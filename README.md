@@ -1,4 +1,4 @@
-# Rage Racer - PC — build sources
+# Rage Racer - PC
 
 This folder contains the Windows source files and build inputs for both
 `RageRacer.exe` and `Generate Data.exe`. It is independent of `Port`, `Source`,
@@ -91,7 +91,7 @@ Native terrain preserves the original and optional 1.5x draw distance.
 Both application icons are built from `assets/Game.ico`, copied from the project root `Game.ico`. Keep this asset with the sources when rebuilding. The game also applies the embedded icon to its window after loading the archive.
 
 Archives made by the retired regional-conversion generator remain compatible as
-European data. To retain your USA or Japan disc�s own region, regenerate data.dat
+European data. To retain your USA or Japan disc’s own region, regenerate data.dat
 with this generator. Existing data.dat is never changed by updating the programs.
 
 
