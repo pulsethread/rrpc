@@ -109,3 +109,5 @@ pool. The independent selector preserves original shuffle/save table sizes.
 See docs/Music.txt for the exported original song/CD-number mappings.
 
 See RELEASE.md for the current release and minimal portable folder contents.
+
+A decent portion of this codebase was developed using AI, so expect bugs!
