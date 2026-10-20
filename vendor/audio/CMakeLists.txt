@@ -1,0 +1,7 @@
+file(GLOB lame_sources CONFIGURE_DEPENDS "lame-3.100/libmp3lame/*.c")
+add_library(rage_mp3_encoder STATIC ${lame_sources} lame-3.100/libmp3lame/vector/xmm_quantize_sub.c)
+target_include_directories(rage_mp3_encoder PUBLIC lame-3.100/include PRIVATE lame-3.100 lame-3.100/libmp3lame)
+target_compile_options(rage_mp3_encoder PRIVATE /FIconfigMS.h /wd4244 /wd4267 /wd4996)
+add_library(rage_mp3_decoder STATIC mp3_decoder.cpp)
+target_include_directories(rage_mp3_decoder PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_features(rage_mp3_decoder PUBLIC cxx_std_17)

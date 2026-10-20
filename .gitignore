@@ -1,0 +1,19 @@
+# Local build products, disc data and user files
+/Build-PC/
+/build/
+/Shareable/
+/.runtime/
+/cache/
+/saves/
+/music/
+/data.dat
+/Src.zip
+__pycache__/
+*.pyc
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.dll
+
+# Embedded OpenBIOS and upstream codec test fixtures are source dependencies.

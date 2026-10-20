@@ -1,0 +1,28 @@
+{
+  "regions": [
+    {
+      "name": "Europe",
+      "serial": "SCES_006.50",
+      "exe_sha256": "41c03b1250cc188e4301a6da1a13a8bf35aa6e1413dbdb38fe941ba8be48d81a",
+      "raw_bytes": 140042784,
+      "raw_sha256": "8170506da5b0a98edf0bbd90d122c97f856981e5d8ab013fa61b2107052997f4",
+      "cooked_sha256": "25367fd7ca0fc0d9d712f9b15b27cd64a3ff73deed21601ebe21fcf77aff7a70"
+    },
+    {
+      "name": "Japan (v1.1)",
+      "serial": "SLPS_006.00",
+      "exe_sha256": "c8d113e69b2efc0af2dd21fc78b48f7dbbc379f2146d222858b8816a4979420f",
+      "raw_bytes": 139911072,
+      "raw_sha256": "83a711f931e0f48e3232238bd0419345bb3a4b40303917c6fdf666a129fb311a",
+      "cooked_sha256": "243bc9e7cd55f4578888426f6df61c17919df5853175f79583ebe094c2d620c7"
+    },
+    {
+      "name": "USA",
+      "serial": "SLUS_004.03",
+      "exe_sha256": "3cedde604eddc454490cda099c3eebc9854c4241f7db1fed5fc762b8fb8a8447",
+      "raw_bytes": 139929888,
+      "raw_sha256": "934ffe3be74cfede6009bae17c221800c40a9d69679e1af037a3600a28ad7936",
+      "cooked_sha256": "16007e1e630359ffb1799d47873bfee4a0b28af8ef75819d2f9606b12dc6f6fb"
+    }
+  ]
+}

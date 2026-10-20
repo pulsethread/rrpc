@@ -1,0 +1,32 @@
+Custom music
+============
+
+Edit songs.ini beside RageRacer.exe. The ten original song names and CD-track
+mappings are already listed. Selection 0 is RANDOM PLAY. Selections 1-9 map
+to original CD tracks 3-11; DEEP DRIVE (selection 10) maps to CD track17.
+The other CD tracks contain intro, result and other scene audio.
+
+To add your own music, put a 44.1kHz stereo MP3 in the music folder, then add:
+
+[song.11]
+name=MY SONG
+file=MySong.mp3
+
+Add song.12, song.13, etc. for further songs (through song.99). Filenames are
+relative to music; spaces and subfolders are supported. Quoted values work.
+Use the left/right controls in pre-race MUSIC SELECT to scroll through the
+original and custom songs. Changing selection gives you more time to choose.
+Changes to songs.ini are read when the next pre-race screen opens.
+
+Names use the original game's ASCII font. The selector displays up to18
+characters of a title. Use MP3 files up to20minutes long. Missing files or
+unsupported audio formats are skipped. RANDOM PLAY retains the original
+game's built-in shuffle pool; select a custom song explicitly to play it.
+
+You can rename a built-in song by editing name=. Its cd_track mapping stays
+fixed. To replace its audio, add file=YourReplacement.mp3 to that song's section.
+Built-in MP3 audio remains in data.dat; adding custom songs does not require
+regenerating data.dat and does not expand the original game's save tables.
+
+Generate Data.exe now encodes original CD audio to320kbps MP3 automatically.
+The game still accepts older archives containing raw CD audio.

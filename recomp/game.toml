@@ -1,0 +1,55 @@
+# Autofilled by tools/new_project_layout/probe_disc.py from your legal dump.
+# Review before shipping. Runtime quirks / overlay seeds still need hand work.
+
+[game]
+name = "Rage Racer"
+id = "SCES-00650"
+players = 1
+exe = "../data/disc/SCES_006.50"
+disc = "../../Source/Rage Racer (Europe).cue"
+load_address = "0x80010000"
+entry_pc = "0x800630B4"
+text_size = "0x0008B000"
+stack_base = "0x801FFFF0"
+
+# Digests are for data Track 01 (first BINARY FILE / TRACK 01).
+[prepare_disc]
+out_dir = "../data/disc"
+bin_name = "Rage Racer (Europe) (Track 01).bin"
+cue_name = "Rage Racer (Europe).cue"
+boot_exe = "SCES_006.50"
+known_sizes = [140042784]
+known_md5 = [
+  "0ecc0b6390c675c7d26336dd0d12ed23",
+]
+known_sha1 = [
+  "7aa631346c9a032b243bd93f7a33e7ed74698c7f",
+]
+known_crc32 = [
+  "60115e23",
+]
+
+[recompiler]
+bios_config = "../vendor/psxrecomp/bios/OpenBIOS.toml"
+seeds = "seeds/ghidra_funcs.txt"
+out_dir = "generated"
+strict = true
+
+[runtime]
+window_title = "Rage Racer - PC"
+memcard_dir = "saves"
+overlay_cache = true
+
+[video]
+renderer = "opengl"
+aspect_ratio = "4:3"
+
+[controller]
+default_mode = "digital"
+
+# Online mount gate: digests + track count + optional TOC fingerprint
+# (see docs/NETPLAY.md).
+[netplay]
+require_cue = true
+required_tracks = 17
+required_disc_fp = "24420e93ea903b2630a43d6a2cae951fde2e7fb9cd6d7dba9d7b2155b560e520"
