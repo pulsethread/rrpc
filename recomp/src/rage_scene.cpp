@@ -4,6 +4,7 @@
 #include "rage_track.h"
 #include "rage_track_fade.h"
 #include "rage_music.h"
+#include "rage_boot_notice.h"
 #include "rage_vehicle_material.h"
 #include "rage_actor_clip.h"
 #include "pgxp_hooks.h"
@@ -16,6 +17,7 @@
 #include <vector>
 #include "rage_scene_pose_math.h"
 using rage_scene_math::native_matrix;
+extern "C" int psx_game_text_native_ok_full(uint32_t);
 using rage_scene_math::determinant;
 
 namespace {
@@ -81,6 +83,12 @@ extern "C" void rage_scene_dispatch(CPUState* cpu, uint32_t target) {
     if (!cpu) return;
     scene_read_word=cpu->read_word;scene_read_half=cpu->read_half;
     target = rage_region_code(target);
+    if(target==0x232b4 && rage_active_region==0 && cpu->read_word && cpu->write_word &&
+       cpu->read_word(0x800232b4)==0x3c038008 && cpu->read_word(0x800232b8)==0x8c63d540 &&
+       psx_game_text_native_ok_full(0x800232b4) &&
+       rage_skip_boot_notice(rage_active_region,cpu->read_word(0x801e42e4),cpu->read_word(0x8007d540))){
+        cpu->write_word(0x8007d540,110);
+    }
     // Music callbacks run only on the short pre-race screen; avoid another
     // function call at every guest dispatch throughout a live race.
     if(target==0x1cfb4 || rage_music_dispatch_pending)rage_music_dispatch(cpu,target);

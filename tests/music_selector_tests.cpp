@@ -1,15 +1,16 @@
 #include "rage_music_selector.h"
 #include "rage_region.h"
+#include "rage_boot_notice.h"
 #include <cassert>
 int main(){
     for(unsigned t=0;t<10000;++t)assert(rage_music_title_offset(18,t)==0);
     assert(rage_music_title_offset(20,999)==0);
     assert(rage_music_title_offset(20,1000)==1);
-    assert(rage_music_title_offset(20,1299)==1);
-    assert(rage_music_title_offset(20,1300)==2);
-    assert(rage_music_title_offset(20,2299)==2);
-    assert(rage_music_title_offset(20,2300)==1);
-    assert(rage_music_title_offset(20,2600)==0);
+    assert(rage_music_title_offset(20,1149)==1);
+    assert(rage_music_title_offset(20,1150)==2);
+    assert(rage_music_title_offset(20,2149)==2);
+    assert(rage_music_title_offset(20,2150)==1);
+    assert(rage_music_title_offset(20,2300)==0);
     assert(rage_music_title_offset(19,999)==0);
     assert(rage_music_title_offset(19,1000)==1);
     assert(rage_music_title_offset(19,2000)==0);
@@ -18,6 +19,13 @@ int main(){
     assert(!gate.update(true));assert(!gate.update(true));
     assert(!gate.update(false));assert(gate.update(true));assert(gate.update(false));
     gate={};assert(!gate.update(false));assert(gate.update(true));
+    assert(rage_skip_boot_notice(0,1,0));
+    assert(rage_skip_boot_notice(0,1,109));
+    assert(!rage_skip_boot_notice(0,1,110));
+    assert(!rage_skip_boot_notice(0,34,0));
+    assert(!rage_skip_boot_notice(0,5,0));
+    assert(!rage_skip_boot_notice(1,1,0));
+    assert(!rage_skip_boot_notice(2,1,0));
     for(unsigned region=0;region<3;++region){
         rage_active_region=region;
         const uint32_t mapping[]={0x801e4b60,0x801e42ec,0x801e4868};

@@ -1,12 +1,18 @@
-# Release 0.3.8
+# Release 0.3.9
+
+Song titles display without surrounding quotation marks and scroll one letter
+every 0.15 seconds, retaining the one-second pauses at either end. The PAL boot
+notice is skipped while preserving the following display setup, Namco logo,
+asset loading and intro. Regions without that notice keep their normal boot.
 
 Music selection now waits for a fresh press of the mapped accelerator button.
 Long titles scroll through an 18-character window, resting at either end for
-one second and advancing one character every 0.3 seconds. Changing songs resets
+one second and advancing one character every 0.15 seconds. Changing songs resets
 the scroll. Digital and NeGcon accelerator assignments are respected.
 
 Validation: all 13 native contract tests passed, including exact scroll timing
-boundaries. A live PAL selector test verified scrolling in both directions,
+boundaries and boot-notice scope. Live EU/US/JP boots reached the intro; the
+PAL notice was skipped. A live PAL selector test verified scrolling in both directions,
 selection reset, waiting beyond the old timeout, ignoring accelerate held on
 entry, and confirming with a remapped accelerator before entering the race.
 
@@ -27,7 +33,7 @@ PS1 draw distance, full-width rendering and MP3/custom music remain included.
 Build the game and generator with `Build.ps1`.
 
 The current verified game executable has SHA-256:
-`64a90c28ef826758a82c48928c5528328e9f863495948e422fa90af33a155cdf`.
+`bc4f381ad0d940ab3414bf6b0c2b0f1bd5438c7e0832bdbb920c4a982e1b9a70`.
 The unchanged audio generator has SHA-256:
 `ec77e654aa784a6dd306849158135b227e56d78341632dd4c6219b4cd207096a`.
 Rebuilding can change executable hashes because build timestamps are embedded.

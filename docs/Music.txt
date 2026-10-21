@@ -21,8 +21,9 @@ accelerate button before pressing it again.
 Changes to songs.ini are read when the next pre-race screen opens.
 
 Names support up to 160 characters using the original game's ASCII font.
-The selector displays an 18-character window: it pauses for one second at the
-start, advances one character every 0.3 seconds until the end is visible,
+Titles display without surrounding quotation marks. The selector displays an
+18-character window: it pauses for one second at the
+start, advances one character every 0.15 seconds until the end is visible,
 pauses for one second, then scrolls back. This repeats while selected.
 Changing songs resets the title to its beginning. Use MP3 files up to20minutes
 long. Missing files or
