@@ -253,3 +253,213 @@ that every audio test is part of the small native-contract test target.
 The v0.3.10 live check also used a twenty-character title that stayed still and
 a twenty-two-character title that visited offsets zero, one and two. A screenshot
 was inspected to confirm that all twenty characters fit the existing panel.
+
+## Implementation walkthrough with source excerpts
+
+The excerpts below are copied from the implementation. They show how native
+C++ code cooperates with the recompiled game's registers, guest memory and CD
+interfaces. Addresses in the selector hook use the European build as their
+canonical form; `address()` maps data locations to the active region, while
+`rage_region_code()` normalizes mapped code entry points to canonical physical
+addresses. They are guest addresses, not pointers to host process memory.
+### Dispatch entry and return tracking
+
+The scene dispatcher enables music callbacks at the round-screen entry and while a callback return is pending. The music hook first filters targets and validates the enhanced profile and memory callbacks. It records the guest return register (`gpr[31]`, MIPS RA) and stack register (`gpr[29]`, SP). Matching both target and stack lets it restore temporary values after the intercepted call. When the scene ID leaves 10, it commits the selection and disables pending dispatch. This keeps the full music hook out of ordinary race dispatch once selection is complete.
+
+```cpp
+    // Music callbacks run only on the short pre-race screen; avoid another
+    // function call at every guest dispatch throughout a live race.
+    if(target==0x1cfb4 || rage_music_dispatch_pending)rage_music_dispatch(cpu,target);
+
+extern "C" void rage_music_dispatch(CPUState* cpu,uint32_t raw_target){
+    const uint32_t target=raw_target<0x80000000u?raw_target:rage_region_code(raw_target);
+    if(target!=0x1cfb4 && target!=0x1cd54 && target!=0x16754 && target!=round_return && target!=draw_return)return;
+    if(!PSX_EXECUTION_ENHANCED || !cpu || !cpu->read_word || !cpu->write_word || !cpu->read_half || !cpu->write_half || !cpu->write_byte)return;
+    const uint32_t sp=cpu->gpr[29],entry=address(0x80000000u|target);
+    if(draw_return && target==draw_return && sp==draw_sp){
+        cpu->write_word(address(0x801e42cc),saved_selection);draw_return=0;
+    }
+    if(round_return && target==round_return && sp==round_sp){
+        cpu->write_half(address(0x801e436e),saved_buttons);round_return=0;
+        if(cpu->read_word(address(0x801e42e4))!=10){commit(cpu);in_round=false;rage_music_dispatch_pending=0;}
+    }
+```
+
+### Mapped controls and a fresh confirmation press
+
+The controller type and live accelerator mapping come from guest memory. NeGcon pressure inputs use the 0x36 threshold; other mappings use a digital bit mask. The confirmation object below arms on release and confirms on a later rising edge. Once confirmed it stays latched until the object is reset on selector entry.
+
+```cpp
+bool accelerator_down(CPUState* cpu){
+    const uint32_t pad=address(0x801e436e)-6;
+    const bool negcon=(cpu->read_half(pad)>>8)==0x23;
+    if(negcon){
+        const unsigned mapping=cpu->read_half(address(0x8019cb08));
+        if(mapping==0 || mapping==5)return cpu->read_half(pad+12)>=0x36;
+        if(mapping==1 || mapping==3 || mapping==6)return cpu->read_half(pad+14)>=0x36;
+    }
+    return (cpu->read_half(pad+2)&cpu->read_half(address(0x801e4b60)+(negcon?10:2)*2))!=0;
+}
+
+struct RageMusicConfirmation {
+    bool armed=false,previous=false,confirmed=false;
+    bool update(bool down){
+        if(!down)armed=true;
+        if(armed && down && !previous)confirmed=true;
+        previous=down;
+        return confirmed;
+    }
+};
+```
+
+### Keeping loading alive while waiting
+
+The original update increments its timer before checking frame 121. Capping the incoming value at 119 keeps that update at 120 while the player browses. Confirmation raises a smaller value to 120 so the original transition can proceed. Clearing bits 0xa000 consumes left/right for this call; the return hook restores the original pressed-button word. The separate native selection may exceed the original catalogue, so the guest selection is reduced to a valid built-in index before the original update accesses its tables.
+
+```cpp
+        const bool confirmed=confirmation.update(accelerator_down(cpu));
+        const uint32_t timer=cpu->read_word(address(0x801e40b8));
+        // UpdateRoundScreen increments this timer before its original 121-frame
+        // transition. Loading and fading continue normally while we wait.
+        if(!confirmed && timer>119)cpu->write_word(address(0x801e40b8),119);
+        else if(confirmed && timer<120)cpu->write_word(address(0x801e40b8),120);
+        cpu->write_half(address(0x801e436e),saved_buttons&~0xa000);
+        // Keep original shuffle/count/save storage within its original bounds.
+        const uint32_t base=selected<songs.size() && songs[selected].file.empty() && songs[selected].cd_track>=3 && songs[selected].cd_track<=11?uint32_t(songs[selected].cd_track-2):0;
+        const uint32_t count=cpu->read_word(address(0x801e40a8));
+        cpu->write_word(address(0x801e42cc),base<=count?base:0);
+```
+
+### Drawing through a bounded guest buffer
+
+The drawing hook temporarily limits the guest selection to index 10, which retains the original two-digit layout. It intercepts only the expected text function, stack depth and drawing coordinates. The title is sliced to twenty characters before text_argument copies it into the existing 88-byte stack buffer. The checks require the cached guest RAM segment, enough space within 2 MiB of physical RAM, and room for a terminator. Register gpr[6] is the third MIPS argument (a2); redirecting it changes the string consumed by the original renderer. The return hook restores the saved selection.
+
+```cpp
+void text_argument(CPUState* cpu,const std::string& text){
+    // DrawBgmSelector owns an88-byte local text buffer at SP+40. Reuse that
+    // buffer only during its verified text calls; no spare guest RAM arena.
+    const uint32_t p=cpu->gpr[29]+40,physical=p&0x1fffffffu;
+    if((p>>24)!=0x80 || physical>0x200000-88 || text.size()>=88)return;
+    for(size_t i=0;i<=text.size();++i)cpu->write_byte(p+uint32_t(i),i<text.size()?uint8_t(text[i]):0);
+    cpu->gpr[6]=p;
+}
+
+    if(target==0x1cd54 && in_round && !songs.empty() && cpu->read_word(entry)==0x27bdff60 && psx_game_text_native_ok_full(entry)){
+        saved_selection=cpu->read_word(address(0x801e42cc));
+        // Value10 selects the original two-digit arrow/number layout. Its
+        // name-table index is valid, even for an independently numbered song.
+        cpu->write_word(address(0x801e42cc),std::min(selected,10u));
+        draw_return=rage_region_code(cpu->gpr[31]);draw_sp=sp;return;
+    }
+    if(target==0x16754 && draw_return && sp==draw_sp-160 && cpu->gpr[5]==0xce){
+        if(cpu->gpr[4]==0x90)text_argument(cpu,songs[selected].name.substr(rage_music_title_offset(songs[selected].name.size(),GetTickCount64()-title_started),rage_music_title_width));
+        else if(cpu->gpr[4]==0x74 || cpu->gpr[4]==0x78)text_argument(cpu,std::to_string(selected));
+    }
+```
+
+### Elapsed-time scrolling arithmetic
+
+For a title of length L, distance = L - 20 is the final window offset. There are distance - 1 intermediate offsets on each leg, each lasting 150 ms. The period therefore contains two 1,000 ms endpoint holds plus two intermediate journeys. The modulo calculation selects the current phase directly from elapsed time. The early return prevents unsigned underflow for short strings; distance = 1 gives travel = 0 and only the endpoint holds. The caller supplies GetTickCount64() - title_started and resets title_started when selection changes.
+
+```cpp
+// Each endpoint rests for one second; intermediate characters last 150 ms.
+inline constexpr size_t rage_music_title_width=20;
+inline size_t rage_music_title_offset(size_t length,uint64_t elapsed){
+    if(length<=rage_music_title_width)return 0;
+    const size_t distance=length-rage_music_title_width;
+    const uint64_t travel=(distance-1)*150;
+    const uint64_t phase=elapsed%(2000+2*travel);
+    if(phase<1000)return 0;
+    if(phase<1000+travel)return 1+size_t((phase-1000)/150);
+    if(phase<2000+travel)return distance;
+    return distance-1-size_t((phase-2000-travel)/150);
+}
+```
+
+### Opening a custom decoder and retaining the CD route
+
+The selected CD number is translated to the guest playback value by subtracting three. A custom file then opens a sample-addressable decoder and borrows track 17. decode_location converts the guest BCD minute/second/frame location into an LBA, subtracting the standard 150-sector offset. Decoder sample counts include both stereo channels, so rounding up by 1,176 produces a sector count. Format, duration, origin and disc extent checks run before installation. The saved loop threshold is replaced while the override is active; clear_custom restores it and destroys the decoder through its RAII owner.
+
+```cpp
+uint32_t decode_location(uint32_t loc){
+    auto bcd=[](uint32_t b){return (b>>4)*10+(b&15);};
+    const uint32_t msf=(bcd(loc&255)*60+bcd((loc>>8)&255))*75+bcd((loc>>16)&255);
+    return msf>=150?msf-150:0;
+}
+void commit(CPUState* cpu){
+    clear_custom();if(!selected || selected>=songs.size())return;
+    const auto& song=songs[selected];cpu->write_word(address(0x801e40e0),uint32_t(song.cd_track-3));
+    if(song.file.empty())return;
+    auto active=std::make_unique<Custom>();
+    if(mp3dec_ex_open_w(&active->decoder,song.file.c_str(),MP3D_SEEK_TO_SAMPLE)!=0)return;
+    active->opened=true;active->origin=decode_location(cpu->read_word(address(0x8009afd4)+17*4));
+    if(active->decoder.info.hz!=44100 || active->decoder.info.channels!=2 || !active->decoder.samples ||
+       active->decoder.samples>uint64_t(44100)*2*60*20 || !active->origin)return;
+    active->sectors=uint32_t((active->decoder.samples+1175)/1176);
+    if(active->origin+active->sectors>449999)return;
+    // The original five-minute restart threshold must not truncate a longer
+    // custom song. Hardware EOF still drives the normal track restart.
+    old_loop=cpu->read_word(address(0x8007f5b0)+17*4);loop_saved=true;
+    cpu->write_word(address(0x8007f5b0)+17*4,0x00005999);
+    std::fprintf(stderr,"Music: custom selection %u, %u sectors\n",selected,active->sectors);
+    custom=std::move(active);
+}
+```
+
+### Reading one sector from the custom MP3
+
+One sector is 588 stereo frames, or 1,176 interleaved signed 16-bit samples and 2,352 bytes. The decoder API seeks in individual samples, hence sector * 1176. The next cursor avoids redundant seeks for sequential reads. A jump back to zero is counted as a restart. The buffer is cleared before reading the final partial sector; only the remaining samples are requested. A failed seek or short read returns failure to the CD bridge.
+
+```cpp
+extern "C" int rage_music_custom_read(uint32_t sector,uint8_t* bytes){
+    if(!custom || !bytes || sector>=custom->sectors)return 0;
+    const uint64_t sample=uint64_t(sector)*1176;
+    if(!sample && custom->next)++custom_restarts;
+    if(custom->next!=sample && mp3dec_ex_seek(&custom->decoder,sample)!=0)return 0;
+    const size_t want=size_t(std::min<uint64_t>(1176,custom->decoder.samples-sample));
+    std::memset(bytes,0,2352);
+    if(mp3dec_ex_read(&custom->decoder,reinterpret_cast<mp3d_sample_t*>(bytes),want)!=want)return 0;
+    custom->next=sample+want;++custom_reads;return 1;
+}
+```
+
+### Connecting the override to the CD reader
+
+The bridge exposes the custom end position as origin + sectors and subtracts origin before requesting a custom sector. Its bounds check is completed by rage_music_custom_read. A mod-provided CD layout takes precedence. These functions serve CD audio reads; ordinary game-data reads keep their existing path. The override is cleared when a different CD track starts, so scene audio can return to the disc archive.
+
+```cpp
+uint32_t iso_cdda_sector_count(void* handle) {
+#ifdef RAGE_GRAPHICS_OPTIONS
+    if(!mod_runtime_cdda_track_count() && rage_music_custom_sectors())
+        return rage_music_custom_origin()+rage_music_custom_sectors();
+#endif
+    return mod_runtime_cdda_track_count()?mod_runtime_cdda_track_start(0):iso_sector_count(handle);
+}
+int iso_read_cdda_sector(void* handle,uint32_t lba,uint8_t* buffer,int size) {
+    if(!handle || !buffer || size<2352) return 0;
+#ifdef RAGE_GRAPHICS_OPTIONS
+    if(!mod_runtime_cdda_track_count() && rage_music_custom_sectors() && lba>=rage_music_custom_origin())
+        return rage_music_custom_read(lba-rage_music_custom_origin(),buffer);
+#endif
+    if(!mod_runtime_cdda_track_count()) return iso_read_raw_sector(handle,lba,buffer,size);
+    uint32_t source=0;
+    const int kind=mod_runtime_read_cdda_sector(lba,buffer,size,&source);
+    return kind==1 || (kind==2 && static_cast<PS1::ISOReader*>(handle)->ReadRawSector(source,buffer));
+}
+```
+
+### Preserving original disc timing in compressed archives
+
+The archive decoder measures its cursor in stereo frames, then multiplies by two for the minimp3 sample API. Its track range begins at the stored pregap, preserving the original sector layout. During load it requires decoder.samples == track.count * 1176, stereo and 44.1 kHz. The generator configures LAME for 320 kbps CBR, writes the LAME timing frame after flushing, then reopens the file to verify this exact decoded count. This checks duration after encoder-delay and padding removal, rather than assuming a compressed byte length determines playback timing.
+
+```cpp
+bool CDDAArchive::read(uint32_t lba,uint8_t* bytes){
+    for(auto& t:tracks)if(lba>=t->pregap && lba-t->pregap<t->count){
+        const uint64_t frame=uint64_t(lba-t->pregap)*588;
+        if(t->next_frame!=frame && mp3dec_ex_seek(&t->decoder,frame*2)!=0)return false;
+        if(mp3dec_ex_read(&t->decoder,reinterpret_cast<mp3d_sample_t*>(bytes),1176)!=1176)return false;
+        t->next_frame=frame+588;return true;
+    }
+    return false;
+}
+```
