@@ -21,7 +21,7 @@ accelerate button before pressing it again.
 Changes to songs.ini are read when the next pre-race screen opens.
 
 Names support up to 160 characters using the original game's ASCII font.
-Titles display without surrounding quotation marks. The selector displays an
+Titles display without surrounding quotation marks. The selector displays a
 20-character window: it pauses for one second at the
 start, advances one character every 0.15 seconds until the end is visible,
 pauses for one second, then scrolls back. This repeats while selected.
@@ -37,3 +37,6 @@ regenerating data.dat and does not expand the original game's save tables.
 
 Generate Data.exe now encodes original CD audio to320kbps MP3 automatically.
 The game still accepts older archives containing raw CD audio.
+
+For a detailed explanation of playback, selection and title scrolling, see
+Music-System.md in this folder.

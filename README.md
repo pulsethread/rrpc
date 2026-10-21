@@ -110,6 +110,8 @@ window, pausing for one second at either end and advancing one character every
 accelerate button to confirm the song and continue. Random Play retains the original built-in shuffle
 pool. The independent selector preserves original shuffle/save table sizes.
 See docs/Music.txt for the exported original song/CD-number mappings.
+For the full explanation of playback, custom songs, confirmation and title
+scrolling, see [How the music system works](docs/Music-System.md).
 
 See RELEASE.md for the current release and minimal portable folder contents.
 
