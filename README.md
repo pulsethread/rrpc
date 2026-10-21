@@ -112,7 +112,8 @@ See docs/Music.txt for the exported original song/CD-number mappings.
 
 See RELEASE.md for the current release and minimal portable folder contents.
 
-Download the two Windows executables from [release/](release/), packaged as
-`RageRacer-PC-v0.3.8.zip`. The setup instructions are in [release/README.md](release/README.md).
+Download the two Windows executables from the [v0.3.8 release](https://github.com/pulsethread/rrpc/releases/tag/v0.3.8),
+packaged as `RageRacer-PC-v0.3.8.zip`. Extract the ZIP, run `Generate Data.exe`
+to create `data.dat` from your supported game disc or image, then run `RageRacer.exe`.
 
 A decent portion of this codebase was developed using AI, so expect bugs!
