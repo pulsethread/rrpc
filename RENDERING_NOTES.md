@@ -1,3 +1,254 @@
+# Animation-ordered AI trails (0.3.21)
+
+A captured trace showed future real-frame lamps being submitted between older
+generated poses (for example tick 3973, followed by tick 3971 at phase 0.792).
+Wall-clock history turned this render scheduling into false left/right motion.
+The live endpoint could also connect to future samples despite the older-tick guard.
+
+Terrain camera receipts now carry the previous tick span and region-specific
+25/30 Hz animation rate. Order samples by interpolated animation time, replacing
+duplicate timestamps, and omit samples newer than the frame being drawn. Measure
+screen speed from chronological net displacement over a short window, keeping
+the 90/60 thresholds. Framebuffer origins are removed while storing points and
+restored while drawing, sharing histories across alternating 320x240 draw pages
+while keeping separate subviews distinct. Large screen jumps reset the path.
+
+Regression checks reproduce future-frame-first submission, reject future points
+from older ribbons, and verify continuous history across framebuffer page flips.
+
+# Continuous source paths with visibility gating (0.3.20)
+
+In title-owned sky receipts, recolour only the flat untextured lower sky quad
+to #0c0c0c. This is the below-world fallback visible through track gaps;
+gradient bands, textured sky tiles, UI and general VRAM clears remain unchanged.
+
+Keep up to 64 consecutive projected samples per source/view. The filtered
+90/60 screen-speed gate controls per-sample exposure, while raw projected
+positions preserve the actual lamp path. Connect the ribbon to the live source
+each frame; retain shared joins and the 0.18-second fading tail. Ignore transient
+one/two-tick receipt regressions rather than repeatedly erasing valid paths.
+
+Batch ANY_SAMPLES_PASSED queries against completed scene depth for small lamp
+centre patches, including the native-wide target. Issue all queries before
+reading their results. An obscured lamp draws no halo or trail and clears its
+history; hidden motion cannot create a streak when the source becomes visible.
+Ribbon fragments also use scene depth. This replaces the unoccluded lens overlay.
+
+Initialize gl_ClipDistance[0] explicitly in the lamp shader: it is enabled during
+runtime lamp drawing and previously undefined. Driver checks now enable the
+runtime clip state, test visible/blocked query results, and verify live attachment.
+
+# Lens-stain persistence and screen-speed gate (0.3.19)
+
+Rear histories track filtered projected motion (25 ms position smoothing,
+40 ms speed smoothing). Deposits start above 90 native screen units/second
+and stop below 60; a one-unit spacing dead zone suppresses subpixel geometry.
+The gate measures screen motion, including camera movement, rather than car speed.
+
+Render deposited stains separately from depth-tested lamp halos. Stain positions
+and birth times remain fixed, are not reattached to the moving lamp, and fade
+over 0.18 seconds even when lamp receipts disappear. Stains draw as a lens overlay,
+so moving scene geometry cannot repeatedly hide and reveal the existing smear.
+No fresh deposits are made by headlights or outside tunnel lamp activation.
+Driver checks cover slow-motion rejection, fast-motion activation, gap reset,
+fixed stain positions and independent fading.
+
+# Softer trails and near-road beam (0.3.18)
+
+Rear ribbon RGB intensity is 0.65 instead of 1.25, without changing sample
+history, width or fade duration. Correct the headlight direction from 12 degrees
+upward to 24 degrees downward in mesh Y-down coordinates. Both body-receipt and
+cockpit-fallback emitters use the corrected aim. Surface brightness, range and
+the upper cutoff are unchanged. Two driver checks verify that the new aim
+reaches a nearby receiver missed by the previous beam.
+
+# Continuous rear ribbons (0.3.17)
+
+Build a continuous polyline from projected history plus an unsampled live lamp
+endpoint. Adjacent quads share bounded miter joins, eliminating cracks and
+overlapping segment ends. Interpolate the oldest point at the 0.18-second
+boundary and use a smoothstep age fade, rather than deleting entire segments.
+Duplicate projected positions are removed before tangent calculation.
+
+Use current lamp depth consistently along the screen-space ribbon, with a small
+bias toward the camera; scene depth testing still occludes solid geometry.
+Additional graphics checks cover shared joins, live attachment, the fading tail
+boundary and consistent ribbon depth.
+
+# Projected rear trails and headlight cutoff (0.3.16)
+
+Rear trails keep 24 projected samples per lamp and viewport rather than world
+positions. Remove the speed gate; stationary screen positions produce no ribbon,
+but either object or camera movement does. Histories expire after gaps, reverse
+ticks, teleports and large projected jumps. Ribbons are five native pixels wide,
+brighter and last 0.18 seconds; depth testing remains active.
+
+Headlight surface upload uses a 0.35 RGB multiplier. In the surface shader,
+headlight-range emitters reject negative world-Y displacement (world Y is down),
+and feather across the first 32 units below lamp height. This prevents upward
+spill even on slopes. Rear lights retain their original spill and lens intensity.
+Driver probes cover below/above cutoff receivers and stationary-world screen motion.
+
+# Headlight tuning (0.3.15)
+
+Front lamps no longer contribute motion ribbons in either body or cockpit
+fallback paths. Apply a 0.85 multiplier to headlight RGB during surface-light
+upload only; lens emission, halos, rear lamps and lamp activation are unchanged.
+
+# Active lamp spill and chase-view trails (0.3.14)
+
+Restore the bounded nearest-16 surface-light upload from active lamp receipts.
+Disabled lamps never enter this list. Both front and rear lamps use the existing
+tunnel/speed trail gate. Direct lens halos retain their directional falloff;
+motion ribbons scatter in all viewing directions and retain scene depth testing.
+This allows headlight and rear-light histories to appear in following views
+without making walls or car bodies transparent.
+
+# Car-lamp scope correction (0.3.13)
+
+Automatic headlights and tail lamps require tunnel shelter. There is no
+daylight tail-lamp baseline. Brake lamps follow actual brake input with no
+release fade; tunnel exit clears automatic lamp strength immediately. The
+existing speed-based rear trails remain restricted to tunnel lighting.
+
+Runtime lamp binding always sets the surface spotlight count to zero. Only
+vehicle lens masks, depth-tested lamp glows and tunnel trails receive the
+added lighting; roads, scenery and tunnel fixtures receive no car-light spill.
+
+# Car lamps and tunnel trails (0.3.12)
+
+Sources adapted from the reference: `src/render/car_lamps.c`,
+`src/render/car_lights.c`, `src/port/modern/modern_material_uniform.c`,
+`src/port/modern/shaders/native_spot.glsl`, the lamp-glow shaders, and the
+car publication and lampsOnly path in `src/port/render_world_game.c`.
+
+The compiled C lamp library preserves the reference's per-car positions, UV
+rectangles, round-lens masks, player variants, rival banks and verified course
+bank aliases. CPU receipts identify the actual body entry and asset family,
+with no lamp metadata attached to wheels or legacy shadow plates. Player
+asset selection follows the original base-variant table and owned grade;
+unsupported banks simply do not receive guessed lamp locations.
+
+The CPU reads each car's real brake input at +0x15E and its own track progress
+at +0x70. Shelter follows the retail zone table, including reversed-series
+progress, entrance/exit blends, no-blend zones and exit-only zones. Address
+mappings come from the reference PAL/JAP11/USA symbol maps. Lights follow the
+reference 0.6-second dark latch, 0.28/0.36 hysteresis, 0.2-second headlight ramp,
+20%-day/40%-tunnel tail intensity and 0.1-second brake release. Automatic
+activation currently follows tunnel shelter, rather than the reference's
+additional sky-daylight animation.
+
+Immutable car receipts travel with scene vertices and queued pose palettes.
+Sixteen mutex-protected player pose snapshots supply the reference's lampsOnly
+behaviour when cockpit rendering omits the player's body. Render-thread
+lookup uses the terrain receipt's exact guest tick and interpolation phase;
+it never reads guest RAM. Player origins retain the reference ground clamp
+and model horizon, and body orientation retains the reference Y/X/Z ordering.
+Visible body receipts take priority over the lamp-only fallback.
+
+Lens UV masks are additionally constrained to the matching pose and nearby
+source lens position, since runtime atlas IDs differ from reference material
+indices. Emission uses bounded headroom compression on the LDR framebuffer,
+so tunnel tail lights do not saturate to the same red level as stop lamps.
+Local spot illumination uses the reference cone/range falloff and compressed
+light accumulation. The nearest sixteen relevant lights are bound per group,
+with range rejection before per-fragment normalization. Halos use the reference
+facing rule, Gaussian profile and outward depth offset. They are depth tested
+and batched per view, preserving mirror exclusion and widescreen clipping.
+Local spot lights do not have a separate ray-traced occlusion pass.
+
+Each rear emitter has a bounded sixteen-point history sampled at intervals of
+at least 8 ms. Ribbon geometry connects those world positions with continuous
+cross-trail falloff and age-based fading, rather than separate dotted halos.
+History is limited to 0.12 seconds; speed influence starts at 80 km/h and
+reaches full strength at 160 km/h. The tunnel/headlight state gates trails.
+Snapshot reversals, gaps and large position jumps clear the history. Opaque
+scene depth hides both halos and ribbons; the overlay does not write depth.
+All buffers, shader resources and histories are released with the renderer.
+
+Validation: fourteen compiled contracts pass. New contracts cover dark-entry
+hysteresis, short bridge shadows, lamp fade timing, braking, speed gates,
+player variants and rival profile mappings. The final driver probe contains
+144 checks, including local-light cone/range rejection, spatially constrained
+lens masks, actual halo shader depth occlusion, and additive blend restoration after a subtractive game effect. It passes at 4:3, 16:9 and
+32:9. The isolated 125-second circuit reported zero track errors. The final
+tunnel regressions demonstrate cockpit headlight activation, chase-camera
+ribbons at speed and automatic light exit; captures and JSON receipts are in
+`Port/data/car-lights-{circuit,tunnel,trail-check,final}`. The circuit precedes
+only lens-emission/LDR refinements and diagnostic live counters; the final
+binary has separate driver and tunnel checks. The final additive-blend regression also passes in all three aspect ratios. No performance speedup is claimed
+for the added lighting. Existing data, memory cards and preferences are kept.
+# Native input caching, light-pass filtering and terrain lighting (0.3.11)
+
+Reference code inspected: `src/port/modern/modern_native_gpu.c`,
+`src/render/render_shadow.c`, `src/render/render_world.c`,
+`src/render/render_stage.c`, `src/render/render_mesh_build.c`, and
+`src/port/modern/shaders/native_{shadow.vert,shadow_masked.frag,texture.frag}.glsl`
+in `rage-racer-pc-main`.
+
+The retained-mesh backend now owns one VAO per cached mesh. Upload establishes
+its five vertex attributes once; regular and intermediate frames bind that
+VAO instead of issuing five enable and five pointer calls per group. Shadow
+index bindings are explicitly reset when a group is rebound. Eviction and
+shutdown release both vertex-input and caster-index resources.
+
+Scene palette allocations are retained by the bounded 1024-slot draw queue,
+with at most 48 poses * 80 bytes per slot. A slot grows only when needed and is
+freed on renderer teardown. Camera lookup first collects the first terrain
+receipt for each distinct draw area, preserving previous selection semantics,
+then shares its inverse across groups in that view. Mirrored views stay separate.
+Only populated view records are initialized, avoiding clearing a 68-KiB scratch
+array on each drain.
+
+For mixed meshes, a cached index buffer selects only triangles whose provoking
+vertex carries the vehicle-caster bit. Indices refer to the existing packed
+vertex buffer; attributes, triangle order, texture alpha, STP rejection, culling
+and fade coverage remain unchanged. Fully casting meshes reuse their existing
+index stream. Allocation failure retains the full-stream depth-pass fallback.
+The reconstruction contract checks both expanded and packed source indices,
+non-caster omission, provoking-vertex selection and incomplete triangles.
+
+Terrain uses the reference stage ambient (0.35,0.35,0.38) and diffuse
+(0.85,0.85,0.80) colours with the existing converted reference sun direction.
+Normals are reconstructed from world-position derivatives because the captured
+retail stream does not supply authored normals. Absolute facing makes the
+retail two-sided surfaces consistent through main and reflected cameras. A
+horizontal lit surface is the brightness reference; 50% influence preserves
+baked colours instead of adding a second full-strength light. Shadow visibility
+separately attenuates ambient to 55% and direct light to 10%, following the
+reference shader. Existing cars, sky, HUD and decals retain their prior colour
+paths. This does not import sky-driven sun animation, spotlights, PBR materials,
+vehicle self-shadowing or the reference ray-tracing structures.
+
+All screen derivatives for receiver-plane correction and normal reconstruction
+now run before any fragment discard. The depth filter obtains its dimensions
+from textureSize rather than assuming 4096; the actual 4096-square runtime map
+is unchanged. This also makes the two-square driver fixture exercise the same
+bilinear comparisons correctly. Six new driver cases verify the lighting and
+shadow split with both ordinary and reflected inverse matrices.
+Validation: all 13 compiled contracts pass. The final executable passed all 136
+driver probes in a race and at 4:3, 16:9 and 32:9. The baseline and final build
+ran sequential 125-second assisted circuits from the same isolated snapshot,
+covering the course segment range with zero reported track errors. Graphics
+preferences were copied from the current release. These are sampled runs, not
+a deterministic frame-for-frame benchmark; pacing and trajectories vary.
+
+Excluding the first five seconds, median real-frame CPU time changed from
+5.999 to 5.711 ms and generated-frame CPU from 2.229 to 2.103 ms. Median real
+GPU time changed from 7.758 to 8.180 ms with the added lighting, and generated
+GPU from 1.198 to 1.112 ms. Real CPU p95 changed from 8.215 to 7.605 ms;
+generated CPU p95 increased from 3.749 to 4.327 ms. Real GPU p95 changed from
+12.757 to 12.201 ms; generated GPU p95 increased from 3.507 to 4.269 ms.
+This supports lower median CPU overhead, not an across-the-board frame-rate
+or hitch-elimination claim.
+
+The final circuit queued 266,069 groups using 250 palette allocation/growth
+operations and 29,840 view inversions. Its light pass submitted 24,631,713
+vertices instead of 25,076,493; 444,780 non-caster vertices were omitted.
+The separate aspect check also exercised the chase camera. Logs and captures
+are under `Port/data/reference-lighting-{before,after,final,aspects}`; the
+intermediate `after` run predates retained VAOs. The old executable is backed
+up under `Port/data/reference-lighting-backup`.
 # Wheel and shadow stability follow-up (0.3.7)
 
 Opaque rotating wheel faces now bypass the original integer-screen winding

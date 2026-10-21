@@ -10707,7 +10707,7 @@ static void handle_render_thread(int id, const char *json)
 #ifdef RAGE_GRAPHICS_OPTIONS
 static void handle_native_material_probe(int id,const char* json) {
     (void)json;const int failures=gl_renderer_native_material_probe();
-    send_fmt("{\"id\":%d,\"ok\":%s,\"samples\":130,\"failures\":%d}",id,failures==0?"true":"false",failures);
+    send_fmt("{\"id\":%d,\"ok\":%s,\"samples\":162,\"failures\":%d}",id,failures==0?"true":"false",failures);
 }
 #endif
 static void handle_frame_gen(int id, const char *json)
@@ -10762,6 +10762,16 @@ static void handle_frame_gen(int id, const char *json)
         (unsigned long long)sky_packets,(unsigned long long)sky_triangles,(unsigned long long)gl_renderer_native_view_clear_count());
     uint64_t native_uploads=0,native_hits=0,native_draws=0,native_camera=0;gl_renderer_native_scene_stats(&native_uploads,&native_hits,&native_draws,&native_camera);
     extern void gl_renderer_native_efficiency(uint64_t out[5]);
+    extern void gl_renderer_native_queue_efficiency(uint64_t out[5]);
+    extern void gl_renderer_car_light_stats(uint64_t out[3]);
+    extern uint64_t gl_renderer_player_lamp_fallbacks(void);
+    extern void gl_renderer_car_lights_live(uint64_t out[3]);
+    {uint64_t live[3];gl_renderer_car_lights_live(live);const size_t n=strlen(buf);snprintf(buf+n,sizeof buf-n,",\"player_headlight_percent\":%llu,\"headlight_sources\":%llu,\"trail_sources\":%llu",(unsigned long long)live[0],(unsigned long long)live[1],(unsigned long long)live[2]);}
+    {const size_t n=strlen(buf);snprintf(buf+n,sizeof buf-n,",\"player_lamp_fallbacks\":%llu",(unsigned long long)gl_renderer_player_lamp_fallbacks());}
+    {uint64_t lights[3];gl_renderer_car_light_stats(lights);const size_t n=strlen(buf);snprintf(buf+n,sizeof buf-n,",\"car_light_frames\":%llu,\"car_lamp_draws\":%llu,\"car_trail_segments\":%llu",(unsigned long long)lights[0],(unsigned long long)lights[1],(unsigned long long)lights[2]);}
+    {uint64_t q[5];gl_renderer_native_queue_efficiency(q);const size_t n=strlen(buf);
+        snprintf(buf+n,sizeof buf-n,",\"palette_allocations\":%llu,\"view_inversions\":%llu,\"queued_groups\":%llu,\"shadow_input_vertices\":%llu,\"shadow_draw_vertices\":%llu",
+            (unsigned long long)q[0],(unsigned long long)q[1],(unsigned long long)q[2],(unsigned long long)q[3],(unsigned long long)q[4]);}
     uint64_t efficiency[5];gl_renderer_native_efficiency(efficiency);
     extern void gl_renderer_vehicle_shadow_stats(uint64_t out[3]);uint64_t shadows[3];gl_renderer_vehicle_shadow_stats(shadows);
     {size_t used=strlen(buf);snprintf(buf+used,sizeof buf-used,",\"vehicle_shadow_maps\":%llu,\"vehicle_shadow_casters\":%llu,\"vehicle_shadow_receivers\":%llu",(unsigned long long)shadows[0],(unsigned long long)shadows[1],(unsigned long long)shadows[2]);}

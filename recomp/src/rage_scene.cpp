@@ -15,6 +15,7 @@
 #include <cstring>
 #include <unordered_map>
 #include <vector>
+#include <mutex>
 #include "rage_scene_pose_math.h"
 using rage_scene_math::native_matrix;
 extern "C" int psx_game_text_native_ok_full(uint32_t);
@@ -33,10 +34,60 @@ struct Node {
     bool shadow=false,shadow_projection_valid=false,vehicle=false;
     float camera_inverse[9]{},camera_rotation[9]{},camera_origin[3]{};
     float model_inverse[9]{};
+    RageCarLightReceipt lamps{};
 };
+struct CarLightHistory {uint32_t tick=~0u;RageCarLightState state{};};
+std::unordered_map<uint32_t,CarLightHistory> car_lights;
+struct PlayerLightSnapshot {uint32_t tick=~0u;RageSceneVertex pose{};RageCarLightReceipt lamps{};};
+std::mutex player_light_mutex;
+PlayerLightSnapshot player_light_snapshots[16];uint32_t player_light_tick=~0u;
 bool enabled=false;
 uint32_t (*scene_read_word)(uint32_t)=nullptr;
 uint16_t (*scene_read_half)(uint32_t)=nullptr;
+uint32_t guest_word(uint32_t p){return scene_read_word(rage_region_address(p));}
+uint8_t guest_byte(uint32_t p){return uint8_t(scene_read_half(p&~1u)>>(8*(p&1)));}
+float car_shelter(uint32_t car){
+    const uint32_t table=guest_word(0x801e4150)&0x1fffffffu;
+    if(table<0x10000 || table>0x200000-0xb64)return 1;
+    int32_t position=int32_t(scene_read_word(car+0x70));
+    if(guest_word(0x801e408c))position=int32_t(guest_word(0x801e40d8)-uint32_t(position));
+    for(int i=0;i<20;++i){const uint32_t p=table+0xa74+12*i;
+        const int32_t start=int32_t(scene_read_word(p)),end=int32_t(scene_read_word(p+4));
+        if(start==-1)break;if(position<=start || position>=end)continue;
+        const int code=int16_t(scene_read_half(p+8));
+        if(code==2)return 1;
+        if(code==-3)return end-position<256?.25f:1.f;
+        const int distance=std::min(position-start,end-position);
+        const float blend=code<0?1.f:std::min(256,distance)/256.f;
+        return 1-.75f*blend;
+    }return 1;
+}
+RageCarLightReceipt car_light_receipt(uint32_t car,bool player,uint32_t entry,uint32_t tick){
+    RageCarLightReceipt result{};
+    if(!scene_read_half || !scene_read_word || car>0x200000-0x19c || guest_word(0x801e42e4)!=12)return result;
+    if(car_lights.size()>32)car_lights.clear();
+    auto& history=car_lights[car];
+    if(history.tick!=tick){
+        const uint32_t delta=tick-history.tick;
+        if(history.tick==~0u || delta>8)history.state={};
+        const float dt=(delta>8?1:delta)/(rage_active_region==0?25.f:30.f);
+        rage_car_light_update(&history.state,car_shelter(car),int16_t(scene_read_half(car+0x15e))>0,dt);
+        history.tick=tick;
+    }
+    result.entity=car;result.entry=entry;result.tick=tick;
+    result.head=history.state.head;result.tail=history.state.tail;result.stop=history.state.stop;
+    result.speed=std::abs(int32_t(scene_read_word(car+0xa4)))*160.f/1168;
+    if(player){const uint32_t index=guest_word(0x801e40d4),table=guest_word(0x8019c7c8)&0x1fffffffu;
+        if(index>=13 || table<0x10000 || table>0x200000-104)return {};
+        const unsigned variant=guest_byte(rage_region_address(0x8007c464)+index)+guest_byte(table+8*index);
+        if(variant>=32)return {};
+        result.asset=0x80000000u|(10+2*variant);
+    }else{const uint32_t course=guest_word(0x801e428c),grade=guest_word(0x8009e6a4);
+        if(course>=4 || grade>=6)return {};
+        result.asset=88+8*grade+2*course;
+    }
+    return result;
+}
 std::atomic<int> original_lod{0};
 std::atomic<uint64_t> high_lod_draws{0},actor_groundings{0};
 std::atomic<int> actor_lift_milli{0};
@@ -64,12 +115,50 @@ SceneryView scenery_views[2];
 
 
 }
+extern "C" void rage_scene_lights_capture(CPUState* cpu,uint32_t frame){
+    if(!cpu || !cpu->read_word || !cpu->read_half)return;
+    scene_read_word=cpu->read_word;scene_read_half=cpu->read_half;
+    std::lock_guard<std::mutex> lock(player_light_mutex);
+    if(frame==player_light_tick)return;
+    const uint32_t previous_tick=player_light_tick;
+    if(frame<player_light_tick)for(auto& old:player_light_snapshots)old={};
+    player_light_tick=frame;
+    PlayerLightSnapshot snapshot;snapshot.tick=frame;
+    const uint32_t car=rage_region_address(0x8009e6d4)&0x1fffffffu;
+    snapshot.lamps=car_light_receipt(car,true,0,frame);
+    if(snapshot.lamps.entity){
+        auto& pose=snapshot.pose;pose.node=1;pose.flags=RAGE_SCENE_FLOAT_TRANSLATION;
+        const double turn=6.283185307179586/4096;
+        const double x=int32_t(scene_read_word(car+0x20))*turn,y=(2048-int32_t(scene_read_word(car+0x24)))*turn,z=int32_t(scene_read_word(car+0x28))*turn;
+        const double cx=std::cos(x),sx=std::sin(x),cy=std::cos(y),sy=std::sin(y),cz=std::cos(z),sz=std::sin(z);
+        const double rx[9]={1,0,0,0,cx,-sx,0,sx,cx},ry[9]={cy,0,-sy,0,1,0,sy,0,cy},rz[9]={cz,-sz,0,sz,cz,0,0,0,1};
+        double base[9]={},body[9]={};for(int r=0;r<3;++r)for(int c=0;c<3;++c)for(int k=0;k<3;++k)base[3*r+c]+=ry[3*r+k]*rx[3*k+c];
+        for(int r=0;r<3;++r)for(int c=0;c<3;++c)for(int k=0;k<3;++k)body[3*r+c]+=base[3*r+k]*rz[3*k+c];
+        for(int i=0;i<9;++i)pose.current.r[i]=int16_t(std::lround(body[i]*4096));
+        const uint32_t asset=guest_word(0x8009e698)&0x1fffffffu;
+        const int horizon=asset>=0x10000 && asset<0x1ffff8?int16_t(scene_read_half(asset+6)):0;
+        const int32_t position[3]={int32_t(scene_read_word(car)),std::min(int32_t(scene_read_word(car+4)),int32_t(scene_read_word(car+0x60)))-horizon,int32_t(scene_read_word(car+8))};
+        for(int i=0;i<3;++i){pose.translation[3+i]=position[i]*4.f;pose.current.t[i]=int32_t(std::lround(pose.translation[3+i]));}
+        const auto& old=player_light_snapshots[previous_tick&15];pose.previous=pose.current;std::memcpy(pose.translation,pose.translation+3,12);
+        if(frame>previous_tick && frame-previous_tick<=4 && old.tick==previous_tick && old.lamps.asset==snapshot.lamps.asset){pose.history=1;pose.previous=old.pose.current;std::memcpy(pose.translation,old.pose.translation+3,12);
+            for(int i=0;i<3;++i)if(std::abs(pose.translation[i]-pose.translation[3+i])>16384)pose.history=0;}
+    }
+    player_light_snapshots[frame&15]=snapshot;
+}
+extern "C" int rage_scene_player_light(uint32_t frame,float phase,RageCarLightPose* out){
+    if(!out)return 0;PlayerLightSnapshot snapshot;
+    {std::lock_guard<std::mutex> lock(player_light_mutex);snapshot=player_light_snapshots[frame&15];}
+    if(snapshot.tick!=frame || !snapshot.lamps.entity)return 0;
+    out->lamps=snapshot.lamps;native_matrix(snapshot.pose,phase,out->world);return 1;
+}
 extern "C" void rage_scene_set_original_lod(int on){original_lod.store(0,std::memory_order_relaxed);}
 extern "C" int rage_scene_original_lod(){return original_lod.load(std::memory_order_relaxed);}
 extern "C" uint64_t rage_scene_high_lod_draws(){return high_lod_draws.load(std::memory_order_relaxed);}
 extern "C" uint64_t rage_scene_actor_groundings(){return actor_groundings.load(std::memory_order_relaxed);}
 extern "C" int rage_scene_actor_lift_milli(){return actor_lift_milli.load(std::memory_order_relaxed);}
 extern "C" void rage_scene_reset() {
+    car_lights.clear();
+    {std::lock_guard<std::mutex> lock(player_light_mutex);for(auto& snapshot:player_light_snapshots)snapshot={};player_light_tick=~0u;}
     nodes.clear(); by_id.clear();scenery_fades.clear();scenery_views[0]={};scenery_views[1]={};scenery_return=0;scenery_fade=0;
     world_poses.clear(); world_epoch=~0u;
     owner=owner_return=owner_sp=draw_return=draw_sp=0;actor_return=actor_sp=0;std::memset(actor_shift,0,12);
@@ -253,6 +342,9 @@ extern "C" uint32_t rage_scene_pose(const int16_t r[9], const int32_t tr[3],
             if (std::abs(double(n.current.t[i])-n.previous.t[i])>16384) n.history=false;
         n.tick=tick; n.captured=true;
         n.vehicle=true;n.player=owner_player;
+        if(!wheel && (owner_player?draw_entry==0:(draw_entry%5==0 || draw_entry%5==4)))
+            n.lamps=car_light_receipt(owner,owner_player,draw_entry,tick);
+        else n.lamps={};
         if(scene_read_half && scene_read_word){
             for(int i=0;i<9;++i)n.view_current.r[i]=int16_t(scene_read_half(0x1f800028+2*i));
             for(int i=0;i<3;++i)n.view_current.t[i]=int32_t(scene_read_word(0x1f800008+4*i))*4;
@@ -298,6 +390,7 @@ extern "C" int rage_scene_vertex(uint32_t id,const float local[3],RageSceneVerte
     const Node& n=*node;
     *out={}; out->node=id; out->history=n.history;out->fade_start=n.fade_start;
     out->previous=n.previous; out->current=n.current;
+    out->lamps=n.lamps;
     if(n.starter)out->flags|=RAGE_SCENE_STARTER;
     if(n.vehicle)out->flags|=RAGE_SCENE_VEHICLE;
     if(n.player)out->flags|=RAGE_SCENE_PLAYER_VEHICLE;
@@ -378,6 +471,7 @@ extern "C" int rage_scene_camera_affine(const RageSceneVertex* v,double phase,fl
 }
 extern "C" void rage_scene_prepare(RageSceneVertex* v,double phase) {
     if(v && v->node) {
+        if((v->flags&RAGE_SCENE_CAMERA) && !v->lamps.entity)v->lamps.head=float(phase);
         native_matrix(*v,phase,v->drawing);
         const double t=v->history?std::max(0.0,std::min(phase,1.0)):1;
         for(int i=0;i<3;++i)v->drawing_camera[i]=(float)(v->camera[i]+(v->camera[3+i]-v->camera[i])*t);

@@ -7,6 +7,14 @@
 static void check(bool value){if(!value)throw std::runtime_error("index reconstruction contract failed");}
 int main(){
     try{
+        {float mixed[9*16]={};uint32_t out[9]={},packed[9]={8,7,6,5,4,3,2,1,0};
+            mixed[2*16+11]=8192;mixed[3*16+11]=8192;mixed[8*16+11]=8192;
+            check(rage_native_caster_indices(mixed,9,nullptr,nullptr)==6);
+            check(rage_native_caster_indices(mixed,9,nullptr,out)==6);
+            const uint32_t expected[6]={0,1,2,6,7,8};check(!memcmp(out,expected,sizeof expected));
+            check(rage_native_caster_indices(mixed,9,packed,out)==6);
+            for(int i=0;i<6;++i)check(out[i]==packed[expected[i]]);
+            check(rage_native_caster_indices(mixed,2,nullptr,out)==0);}
         /* The optimized admission path must produce exactly the former
          * 32-float staging/packing result across every authored bias and
          * main/mirror winding, window, filtering and raw-colour combination. */

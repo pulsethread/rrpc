@@ -314,6 +314,7 @@ extern "C" void rage_track_dispatch(CPUState* cpu,uint32_t target) {
     pending.ctx=cpu->gpr[4];pending.ret=rage_region_code(cpu->gpr[31]);
     pending.sp=cpu->gpr[29];pending.start=cpu->read_word(pending.ctx)&0x1fffffffu;
     pending.tick=new_tick;pending.key=pending.ret^(cpu->read_word(pending.ctx+0x68)?0x1000000u:0);
+    rage_scene_lights_capture(cpu,new_tick);
     pending.unlit=cpu->read_word(pending.ctx+0x84)!=0;
     // Capture exactly the stock renderer's visible sector identities. Native
     // interpolation reuses this selection rather than extending it off-camera.
@@ -329,6 +330,7 @@ extern "C" void rage_track_dispatch(CPUState* cpu,uint32_t target) {
     if(variant<6 && kind<4 && page<2){unsigned source=2+variant*8+kind*2+page;if(rage_course_texture_pixels(source))pending.texture_source=source;}
 
     auto& p=pending.pose;p.node=0x70000000u|(pending.key&0xfffffu);p.flags=RAGE_SCENE_FLOAT_TRANSLATION|RAGE_SCENE_CAMERA;
+    p.lamps.tick=new_tick;p.lamps.head=1;p.lamps.tail=1;p.lamps.speed=rage_active_region==0?25.f:30.f;
     const bool mirror=cpu->read_word(pending.ctx+0x68)!=0;
     if(mirror){p.flags|=RAGE_SCENE_MIRRORED_VIEW;p.node|=0x00800000u;}
     for(int row=0;row<3;++row)for(int col=0;col<3;++col) {
@@ -346,6 +348,7 @@ extern "C" void rage_track_dispatch(CPUState* cpu,uint32_t target) {
     p.previous=p.current;std::memcpy(p.translation,p.translation+3,12);
     auto old=history.find(pending.key);
     if(old!=history.end() && pending.tick>old->second.tick && pending.tick-old->second.tick<=4) {
+        p.lamps.tail=float(pending.tick-old->second.tick);
         p.history=1;p.previous=old->second.pose.current;
         std::memcpy(p.translation,old->second.pose.translation+3,12);
         std::memcpy(p.camera,old->second.pose.camera+3,12);

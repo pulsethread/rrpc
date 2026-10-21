@@ -106,7 +106,10 @@ static int submit(uint32_t address,int dx,int dy,uint32_t window,const uint32_t*
             vertex.u=uv&255;vertex.v=(uv>>8)&255;
             region[0]=std::min(region[0],float(vertex.u));region[1]=std::min(region[1],float(vertex.v));
             region[2]=std::max(region[2],float(vertex.u));region[3]=std::max(region[3],float(vertex.v));
-            vertex.r=(colour&255)/255.0;vertex.g=((colour>>8)&255)/255.0;vertex.b=((colour>>16)&255)/255.0;
+            // The flat lower sky quad fills undefined space behind the track.
+            // Keep gradient/cloud bands authored; use charcoal only for this fallback.
+            if(!textured && !gouraud && n==4)vertex.r=vertex.g=vertex.b=12.f/255.f;
+            else{vertex.r=(colour&255)/255.0;vertex.g=((colour>>8)&255)/255.0;vertex.b=((colour>>16)&255)/255.0;}
             double camera[3];rage_scene_evaluate(&vertex.scene,1,camera);vertex.z=camera[2];
             vertex.x=(camera[0]*vertex.scene.projection[0]/256+vertex.scene.projection[2])*vertex.z;
             vertex.y=(camera[1]+vertex.scene.projection[3])*vertex.z;

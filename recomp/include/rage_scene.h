@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include "render_pass_motion.h"
+#include "rage_car_lamps.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -16,6 +17,7 @@ typedef struct RageSceneVertex {
     float camera[6], drawing_camera[3]; /* Previous/current world-space camera origins. */
     float translation[6]; /* Optional unrounded previous/current camera translations. */
     int16_t vehicle_view[18]; /* Previous/current car camera bases; origins use camera[]. */
+    RageCarLightReceipt lamps; /* Immutable car state, carried to the render thread. */
 } RageSceneVertex;
 enum { RAGE_SCENE_FLOAT_TRANSLATION=1, RAGE_SCENE_MIRRORED_VIEW=2, RAGE_SCENE_DECAL=4, RAGE_SCENE_CAMERA=8, RAGE_SCENE_REGION=16, RAGE_SCENE_REPEAT_U=32, RAGE_SCENE_REPEAT_V=64, RAGE_SCENE_SOLID=128, RAGE_SCENE_BACKGROUND=256, RAGE_SCENE_MATERIAL_REGION=512, RAGE_SCENE_UI=1024, RAGE_SCENE_GPU_CLIP=2048, RAGE_SCENE_WALL_CULL=4096, RAGE_SCENE_COVERAGE=8192, RAGE_SCENE_STARTER=16384, RAGE_SCENE_VEHICLE=32768, RAGE_SCENE_PLAYER_VEHICLE=16777216 };
 void rage_scene_enable(int enabled);
@@ -28,6 +30,8 @@ uint64_t rage_scene_actor_groundings(void);
 int rage_scene_actor_lift_milli(void);
 void rage_scene_reset(void);
 void rage_scene_dispatch(struct CPUState* cpu, uint32_t target);
+void rage_scene_lights_capture(struct CPUState* cpu,uint32_t tick);
+int rage_scene_player_light(uint32_t tick,float phase,RageCarLightPose* out);
 int rage_scene_tread_winding(struct CPUState* cpu);
 uint64_t rage_scene_tread_faces(void);
 uint32_t rage_scene_pose(const int16_t rotation[9], const int32_t translation[3],

@@ -772,6 +772,7 @@ static int s_scene_drawing=0;
 static RageSceneVertex s_scene_vertices[3];
 enum { RAGE_SCENE_PALETTE=48 };
 static float s_scene_batch_rows[RAGE_SCENE_PALETTE*12],s_scene_batch_projection[RAGE_SCENE_PALETTE*4],s_scene_batch_camera[RAGE_SCENE_PALETTE*4];
+static RageCarLightReceipt s_scene_batch_lamps[RAGE_SCENE_PALETTE];
 static int s_scene_palette_count=0,s_scene_palette_index=0;
 static GLint s_scene_uRows=-1,s_scene_uProjection=-1;
 static GLint s_scene_geo_depth=-1,s_scene_tex_depth=-1;
@@ -4830,12 +4831,14 @@ static void gpu_textured_triangle(const int *xs, const int *ys,
         int pose=0;
         while(pose<s_scene_palette_count && (memcmp(s_scene_batch_rows+pose*12,s_scene_vertices[0].drawing,48) ||
             memcmp(s_scene_batch_projection+pose*4,s_scene_vertices[0].projection,16) ||
-            memcmp(s_scene_batch_camera+pose*4,origin,16))) ++pose;
+            memcmp(s_scene_batch_camera+pose*4,origin,16) ||
+            memcmp(s_scene_batch_lamps+pose,&s_scene_vertices[0].lamps,sizeof(RageCarLightReceipt)))) ++pose;
         if(pose==RAGE_SCENE_PALETTE){flush_tex_batch();s_scene_palette_count=0;pose=0;}
         if(pose==s_scene_palette_count) {
             memcpy(s_scene_batch_rows+pose*12,s_scene_vertices[0].drawing,48);
             memcpy(s_scene_batch_projection+pose*4,s_scene_vertices[0].projection,16);
             memcpy(s_scene_batch_camera+pose*4,origin,16);
+            s_scene_batch_lamps[pose]=s_scene_vertices[0].lamps;
             ++s_scene_palette_count;
         }
         s_scene_palette_index=pose;
@@ -5463,7 +5466,7 @@ static int rage_native_terrain_triangle(const PSXProjectedVertex v[3],uint16_t p
     int pose=0;while(pose<s_scene_palette_count && (memcmp(s_scene_batch_rows+pose*12,v[0].scene.drawing,48) ||
         memcmp(s_scene_batch_projection+pose*4,v[0].scene.projection,16) || memcmp(s_scene_batch_camera+pose*4,origin,16)))++pose;
     if(pose==RAGE_SCENE_PALETTE){flush_tex_batch();s_scene_palette_count=0;pose=0;}
-    if(pose==s_scene_palette_count){memcpy(s_scene_batch_rows+pose*12,v[0].scene.drawing,48);memcpy(s_scene_batch_projection+pose*4,v[0].scene.projection,16);memcpy(s_scene_batch_camera+pose*4,origin,16);++s_scene_palette_count;}
+    if(pose==s_scene_palette_count){memcpy(s_scene_batch_rows+pose*12,v[0].scene.drawing,48);memcpy(s_scene_batch_projection+pose*4,v[0].scene.projection,16);memcpy(s_scene_batch_camera+pose*4,origin,16);s_scene_batch_lamps[pose]=v[0].scene.lamps;++s_scene_palette_count;}
     s_pz[0]=s_pz[1]=s_pz[2]=256;depth_before_tri();
     if(s_tb_n==0){
         const int xs[3]={s_area_x1,s_area_x2,s_area_x1},ys[3]={s_area_y1,s_area_y1,s_area_y2};mark_prim_dirty(xs,ys,3,1);
@@ -12085,6 +12088,7 @@ static int s_fg_camera_affine_valid[16];
 typedef struct FgNativePose {uint32_t node;float drawing[12],camera[3];} FgNativePose;
 static FgNativePose s_fg_native_poses[256];static int s_fg_native_pose_count;
 static void fg_native_prepare(RageSceneVertex* vertex,double phase) {
+    if((vertex->flags&RAGE_SCENE_CAMERA) && !vertex->lamps.entity)vertex->lamps.head=(float)phase;
     for(int i=0;i<s_fg_native_pose_count;++i)if(s_fg_native_poses[i].node==vertex->node) {
         memcpy(vertex->drawing,s_fg_native_poses[i].drawing,48);
         memcpy(vertex->drawing_camera,s_fg_native_poses[i].camera,12);++s_fg_pose_reuses_rt;return;

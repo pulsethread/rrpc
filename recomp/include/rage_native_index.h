@@ -9,6 +9,15 @@ typedef struct RageNativeIndex {
     uint32_t* indices;
     size_t count;
 } RageNativeIndex;
+/* The depth pass only needs tagged vehicle triangles. Use the same provoking
+ * vertex as GL's flat material interpolation and preserve exact mesh indices. */
+static inline size_t rage_native_caster_indices(const float* vertices,size_t count,
+    const uint32_t* packed,uint32_t* out) {
+    size_t written=0;
+    for(size_t i=0;i+2<count;i+=3)if((int)vertices[(i+2)*16+11]&8192)
+        for(size_t k=0;k<3;++k){if(out)out[written]=packed?packed[i+k]:(uint32_t)(i+k);++written;}
+    return written;
+}
 static inline void rage_native_index_release(RageNativeIndex* pack) {
     free(pack->vertices);free(pack->indices);memset(pack,0,sizeof(*pack));
 }

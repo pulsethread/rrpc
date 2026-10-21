@@ -115,8 +115,8 @@ scrolling, see [How the music system works](docs/Music-System.md).
 
 See RELEASE.md for the current release and minimal portable folder contents.
 
-Download the two Windows executables from the [v0.3.10 release](https://github.com/pulsethread/rrpc/releases/tag/v0.3.10),
-packaged as `RageRacer-PC-v0.3.10.zip`. Extract the ZIP, run `Generate Data.exe`
+Download the two Windows executables from the [latest release](https://github.com/pulsethread/rrpc/releases/latest),
+packaged as `RageRacer-PC-v<version>.zip`. Extract the ZIP, run `Generate Data.exe`
 to create `data.dat` from your supported game disc or image, then run `RageRacer.exe`.
 
 A decent portion of this codebase was developed using AI, so expect bugs!
