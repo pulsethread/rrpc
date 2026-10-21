@@ -15,8 +15,9 @@ typedef struct RageSceneVertex {
     float drawing[12]; /* Native floating-point model/view rows for the GPU. */
     float camera[6], drawing_camera[3]; /* Previous/current world-space camera origins. */
     float translation[6]; /* Optional unrounded previous/current camera translations. */
+    int16_t vehicle_view[18]; /* Previous/current car camera bases; origins use camera[]. */
 } RageSceneVertex;
-enum { RAGE_SCENE_FLOAT_TRANSLATION=1, RAGE_SCENE_MIRRORED_VIEW=2, RAGE_SCENE_DECAL=4, RAGE_SCENE_CAMERA=8, RAGE_SCENE_REGION=16, RAGE_SCENE_REPEAT_U=32, RAGE_SCENE_REPEAT_V=64, RAGE_SCENE_SOLID=128, RAGE_SCENE_BACKGROUND=256, RAGE_SCENE_MATERIAL_REGION=512, RAGE_SCENE_UI=1024, RAGE_SCENE_GPU_CLIP=2048, RAGE_SCENE_WALL_CULL=4096, RAGE_SCENE_COVERAGE=8192 };
+enum { RAGE_SCENE_FLOAT_TRANSLATION=1, RAGE_SCENE_MIRRORED_VIEW=2, RAGE_SCENE_DECAL=4, RAGE_SCENE_CAMERA=8, RAGE_SCENE_REGION=16, RAGE_SCENE_REPEAT_U=32, RAGE_SCENE_REPEAT_V=64, RAGE_SCENE_SOLID=128, RAGE_SCENE_BACKGROUND=256, RAGE_SCENE_MATERIAL_REGION=512, RAGE_SCENE_UI=1024, RAGE_SCENE_GPU_CLIP=2048, RAGE_SCENE_WALL_CULL=4096, RAGE_SCENE_COVERAGE=8192, RAGE_SCENE_STARTER=16384, RAGE_SCENE_VEHICLE=32768, RAGE_SCENE_PLAYER_VEHICLE=16777216 };
 void rage_scene_enable(int enabled);
 int rage_scene_racing(void);
 int rage_scene_full_width(void);

@@ -14,6 +14,9 @@ int main() {
 
         {float input[32]={},output[16]={};input[26]=float((255u<<10)|262144u|524288u);rage_native_pack_vertex(output,input,0);
          require(int8_t(int(output[10])>>1)==-1);require((int(output[11])&1536)==1536);}
+        {float input[32]={},output[16]={};input[26]=2097152.f;rage_native_pack_vertex(output,input,0);require((int(output[11])&4096)!=0);require(output[10]==0);}
+        {float input[32]={},output[16]={};input[26]=float(4194304u|8388608u|(255u<<10));rage_native_pack_vertex(output,input,0);
+         require((int(output[11])&24576)==24576);require(int8_t(int(output[10])>>1)==-1);}
         require(rage_vehicle_tread_material(0,0x29064,0x280c0c0c));
         require(rage_vehicle_tread_material(5,0x293f0,0x28101010));
         require(!rage_vehicle_tread_material(1,0x29064,0x280c0c0c));
@@ -25,13 +28,28 @@ int main() {
         require(rage_vehicle_tread_material(0,0x29230,0x280c0c0c));
         require(rage_vehicle_tread_material(4,0x295bc,0));
         require(!rage_vehicle_tread_material(1,0x295bc,0));
+        // AI front/rear wheel streams, including distant zero-area caps,
+        // retain opaque geometry without admitting shadows or far bodies.
+        require(rage_vehicle_wheel_material(false,true,2,0x29230,0));
+        require(rage_vehicle_wheel_material(false,false,33,0x295bc,0));
+        require(rage_vehicle_wheel_material(false,false,3,0x29064,0x280c0c0c));
+        require(!rage_vehicle_wheel_material(false,false,1,0x29230,0));
+        require(!rage_vehicle_wheel_material(false,false,4,0x29230,0));
+        require(!rage_vehicle_wheel_material(false,false,3,0x29064,0x2a0c0c0c));
+        require(rage_vehicle_wheel_material(true,false,6,0x29230,0));
+        require(!rage_vehicle_wheel_material(true,false,1,0x29230,0));
+        require(!rage_vehicle_shadow_entry(true,false,6));
+        require(rage_vehicle_shadow_entry(true,false,1));
+        require(rage_vehicle_shadow_entry(false,false,6));
+        require(!rage_vehicle_shadow_entry(false,true,2));
         const auto code=[](RageTrackProjection p){return rage_track_outcode(p,0,0,320,240,10000);};
         require(code({16000,12000,100})==0);
         require((code({-100,100,100})&code({-200,200,100})&code({-300,300,100}))!=0);
         // A straddling triangle must survive even if no corner is in-view.
         require((code({-100,100,100})&code({33000,100,100})&code({16000,-100,100}))==0);
         require((code({-100,-100,-1})&code({16000,12000,100})&code({32000,24000,100}))==0);
-        require((code({0,0,1})&code({1,0,2})&code({0,1,3}))&1);
+        require((code({0,0,.1})&code({0,0,.2})&code({0,0,.3}))&1);
+        require(!(code({0,0,2})&1));
         require((code({0,0,10001})&code({1,0,10002})&code({0,1,10003}))&2);
         std::array<unsigned char,1057> bytes{};
         for(size_t i=0;i<bytes.size();++i)bytes[i]=(unsigned char)(i*73+19);

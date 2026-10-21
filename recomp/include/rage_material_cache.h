@@ -119,6 +119,7 @@ static int rage_material_acquire(int px,int py,int depth,int cx,int cy) {
             if(!s_material_slots[i].occupied){slot=i;break;}
             if(s_material_slots[i].touched<s_material_slots[slot].touched)slot=i;
         }
+        if(s_material_slots[slot].occupied)rage_native_scene_flush();
         // Queued draws must finish before an atlas tile is replaced.
         flush_flat_batch();flush_tex_batch();
         s_material_slots[slot]=(RageMaterialSlot){1,1,px+external*1024,py,depth,cx,cy,accurate,twin};
@@ -129,6 +130,7 @@ material_found:
     s_material_lookup[bucket]=slot+1;s_material_slots[slot].touched=s_material_clock;
     RageMaterialSlot* m=&s_material_slots[slot];
     if(m->dirty) {
+        rage_native_scene_flush();
         flush_flat_batch();flush_tex_batch();
         if(!rage_material_init())return -1;
         const int x=(slot%16)*256,y=(slot/16)*256;

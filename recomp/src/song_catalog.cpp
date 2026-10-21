@@ -19,7 +19,7 @@ std::vector<RageSong> rage_song_catalog(const std::filesystem::path& folder){
         out<<"; Original selection 0 = RANDOM PLAY. Songs 1..9 use CD tracks 3..11; song 10 uses CD17.\n"
               "; Add [song.11], name=Your title, file=your-song.mp3 (inside music/).\n"
               "; MP3: 44.1kHz stereo, up to 20 minutes. Entries are shown in numeric section order.\n"
-              "; Names use the original ASCII font; the selector shows the first 18 characters.\n"
+              "; Names use the original ASCII font; long titles scroll in the selector.\n"
               "; Base cd_track mappings are fixed. A file= entry can also replace a base song.\n\n";
         for(int i=0;i<10;++i)out<<"[song."<<i+1<<"]\nname="<<names[i]<<"\ncd_track="<<(i==9?17:i+3)<<"\n\n";
     }

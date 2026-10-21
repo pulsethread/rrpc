@@ -2425,8 +2425,14 @@ static void apply_psx_blend(int mode) {
     }
 }
 
+#ifdef RAGE_GRAPHICS_OPTIONS
+static void rage_native_scene_flush(void);
+#endif
 /* ---- hr FBO render-state bracket ---------------------------------------- */
 static void hr_begin(int clip_to_draw_area) {
+#ifdef RAGE_GRAPHICS_OPTIONS
+    rage_native_scene_flush();
+#endif
     p_glBindFramebuffer(PSXGL_FRAMEBUFFER, s_hr_fbo);
     glViewport(0, 0, VRAM_W * s_hr_scale, VRAM_H * s_hr_scale);
     glEnable(GL_SCISSOR_TEST);
@@ -3161,6 +3167,9 @@ static const HiwTile *hiw_ensure(int x0, int x1) {
 
 /* ---- coherency: hr FBO -> raw mirror (pack) ------------------------------ */
 static void pack_flush(void) {
+#ifdef RAGE_GRAPHICS_OPTIONS
+    rage_native_scene_flush();
+#endif
     if (!s_raster_ok || !s_pack_dirty.set) return;
     /* A generated frame draws into its own surfaces: the raw mirror keeps
      * the real VRAM (its pack dirt is restored afterwards). */
@@ -3433,7 +3442,9 @@ void gl_renderer_set_pgxp_depth(int on) {
 int  gl_renderer_get_pgxp_depth(void) { return s_pgxp_depth; }
 #ifdef RAGE_GRAPHICS_OPTIONS
 void gl_renderer_set_scene_depth(int on) {
-    GL_RT_SYNC("scene_depth"); s_scene_depth_owned=on!=0;
+    GL_RT_SYNC("scene_depth");
+    flush_flat_batch();flush_tex_batch();rage_native_scene_flush();
+    s_scene_depth_owned=on!=0;
     gl_renderer_set_pgxp_depth(on);
     if(s_geo_prog && s_tex_prog) {
         flush_flat_batch();flush_tex_batch();
@@ -4414,6 +4425,7 @@ static void depth_clear_now(void) {
     flush_tex_batch();
 #ifdef RAGE_GRAPHICS_OPTIONS
     if(s_scene_depth_owned) {
+        rage_native_scene_flush();s_vehicle_shadow_valid=0;
         s_scene_views.count=0;
         s_rage_dof_views.count=0;
         // Scene depth belongs to the frame, not a legacy clipping rectangle.
@@ -5002,6 +5014,9 @@ static void gpu_textured_triangle(const int *xs, const int *ys,
                 if(s_scene_vertices[i].flags&RAGE_SCENE_MATERIAL_REGION)vp[26]+=(float)512;
             }
             if(scene_material>=0)vp[26]=(float)(((int)vp[26]&960)|(filter&15));
+            if(scene_native && (s_scene_vertices[i].flags&RAGE_SCENE_STARTER))vp[26]+=2097152.f;
+            if(scene_native && (s_scene_vertices[i].flags&RAGE_SCENE_PLAYER_VEHICLE))vp[26]+=8388608.f;
+            if(scene_native && (s_scene_vertices[i].flags&RAGE_SCENE_VEHICLE))vp[26]+=4194304.f;
             if(scene_native)vp[26]+=(float)(((s_scene_vertices[i].flags>>16)&255u)<<10);
             if(scene_native && s_material_hw_filter && ((texpage>>9)&127)>=2)vp[26]+=1048576.f;
             if(scene_native && (s_scene_vertices[i].flags&RAGE_SCENE_WALL_CULL))vp[26]+=(float)(262144u|((s_scene_vertices[i].flags&RAGE_SCENE_MIRRORED_VIEW)?524288u:0u));
@@ -5174,6 +5189,9 @@ static void gpu_fill(int x,int y,int w,int h,uint16_t c) {
     flush_flat_batch();
     flush_tex_batch();
     flush_cpu_upload();
+#ifdef RAGE_GRAPHICS_OPTIONS
+    rage_native_scene_flush();
+#endif
     float r, g, b;
     c5_to_float(c, &r, &g, &b);
     x &= VRAM_W - 1; y &= VRAM_H - 1;
@@ -5211,6 +5229,9 @@ static void gpu_copy_rect(int sx,int sy,int dx,int dy,int w,int h) {
     flush_flat_batch();
     flush_tex_batch();
     flush_cpu_upload();
+#ifdef RAGE_GRAPHICS_OPTIONS
+    rage_native_scene_flush();
+#endif
     /* Clamp to bounds (the software path wraps; wrapping copies are unused
      * in practice — see the file header). */
     if (sx < 0) sx = 0; if (sy < 0) sy = 0;
@@ -5446,19 +5467,18 @@ static int rage_native_terrain_triangle(const PSXProjectedVertex v[3],uint16_t p
     s_pz[0]=s_pz[1]=s_pz[2]=256;depth_before_tri();
     if(s_tb_n==0){
         const int xs[3]={s_area_x1,s_area_x2,s_area_x1},ys[3]={s_area_y1,s_area_y1,s_area_y2};mark_prim_dirty(xs,ys,3,1);
+        s_native_terrain_poses=0;
         s_tb_scene_native=1;s_tb_scene_decal=decal;s_tb_scene_background=0;s_tb_scene_terrain=terrain;s_tb_semi=semi;s_tb_depth=1;
         s_tb_bank_tex=0;s_tb_bank_live_clut=0;s_tb_hd_tex=0;s_tb_mask=s_mask_set;s_tb_gate=0;
         s_tb_filter=s_tex_filter|(s_tex_lod?16:0);
         s_tb_twin[0]=s_tw_mask_x;s_tb_twin[1]=s_tw_mask_y;s_tb_twin[2]=s_tw_off_x;s_tb_twin[3]=s_tw_off_y;
     }
-    for(int i=0;i<3;++i){float* out=s_tb+(s_tb_n+i)*TEXV;memset(out,0,TEXV*sizeof(float));
-        out[2]=(float)v[i].u;out[3]=(float)v[i].v;out[4]=(float)v[i].r;out[5]=(float)v[i].g;out[6]=(float)v[i].b;out[13]=(float)raw;
-        memcpy(out+14,v[i].scene.region,16);memcpy(out+27,v[i].scene.local,12);out[30]=(float)(pose+1);out[31]=(float)(material+1);
-        unsigned attributes=(unsigned)s_tex_filter|(s_tex_lod?16u:0u)|(((v[i].scene.flags>>16)&255u)<<10);
-        if(v[i].scene.flags&RAGE_SCENE_REPEAT_U)attributes|=64;if(v[i].scene.flags&RAGE_SCENE_REPEAT_V)attributes|=128;
-        if(v[i].scene.flags&RAGE_SCENE_WALL_CULL)attributes|=262144;
-        if(s_material_hw_filter && ((page>>9)&127)>=2)attributes|=1048576;
-        out[26]=(float)attributes;
+    int dense=0;while(dense<s_native_terrain_poses && s_native_terrain_original[dense]!=pose)++dense;
+    if(dense==s_native_terrain_poses)s_native_terrain_original[s_native_terrain_poses++]=pose;
+    for(int i=0;i<3;++i){float* out=s_native_vertices+(s_tb_n+i)*RAGE_NATIVE_FLOATS;
+        rage_native_pack_terrain(out,&v[i].scene,v[i].u,v[i].v,v[i].r,v[i].g,v[i].b,
+            (unsigned)material,(unsigned)dense,(unsigned)raw,(unsigned)s_tex_filter,s_tex_lod,
+            s_material_hw_filter && ((page>>9)&127)>=2);
     }
     s_tb_n+=3;++s_scene_prims_tex;return 1;
 }
@@ -6746,6 +6766,9 @@ static void pass_resources_release(void);
 
 void gl_renderer_shutdown(void) {
     gl_renderer_render_thread_stop();   /* the context comes back to this thread */
+#ifdef RAGE_GRAPHICS_OPTIONS
+    if(s_ctx)rage_native_scene_flush();
+#endif
     s_native_surface_enabled=s_native_surface_pending=0;
     gl_renderer_clear_hd_texture_cache();
     pass_resources_release();
@@ -7148,6 +7171,9 @@ void gl_renderer_diag(int *gpu_dirty, int pending[5], int pack[5]) {
  * ------------------------------------------------------------------------- */
 
 static void wide_free_all(void) {
+#ifdef RAGE_GRAPHICS_OPTIONS
+    if(s_ctx)rage_native_scene_flush();
+#endif
     if (s_ctx) hiw_flush_queue();   /* queued mirrors target these surfaces */
     for (int i = 0; i < WIDE_MAX_SURF; i++) {
         if (s_wide_fbo[i]) { p_glDeleteFramebuffers(1, &s_wide_fbo[i]); s_wide_fbo[i] = 0; }
@@ -11202,6 +11228,9 @@ static int rth_record_present(uint16_t op, int n, const int32_t *v) {
 
 static void rth_present_payload(uint16_t op, const uint8_t *p);
 static void rth_replay_present(const RtCmd *c, const uint8_t *p) {
+#ifdef RAGE_GRAPHICS_OPTIONS
+    flush_tex_batch();rage_native_scene_flush();
+#endif
     static int skipped_last = 0;
     const int stale = rt_frames_ahead() >= 2 && !skipped_last;
     /* Frame generation schedules (or drops) presents itself. */
@@ -11662,6 +11691,25 @@ static int fg_raw_add(const FgRaw *r) {
 
 /* Which records a generated frame redraws: draw state and drawing, never
  * transfers, copies, presents, steps or diagnostics. */
+#ifdef RAGE_GRAPHICS_OPTIONS
+typedef struct RageTerrainBatchHeader {
+    RageSceneVertex pose;
+    uint32_t count, source, unlit, restore_window;
+} RageTerrainBatchHeader;
+static void rage_terrain_replay(const RageTerrainBatchHeader*,const PSXTerrainTriangle*,uint16_t,int);
+static int rage_compact_terrain(void) {
+    static int enabled=-1;
+    if(enabled<0){const char* value=getenv("RAGE_COMPACT_TERRAIN");enabled=!value || value[0]!='0';}
+    return enabled;
+}
+/* The camera is shared by an entire terrain range. Do not expand it into
+ * three motion receipts per triangle merely to recover it on replay. */
+static const RageSceneVertex* fg_record_scene(uint16_t op,const void* payload) {
+    if(op==RTH_PROJ_TRI)return &((const PSXProjectedVertex*)payload)->scene;
+    if(op==RTH_TERRAIN_BATCH)return &((const RageTerrainBatchHeader*)payload)->pose;
+    return NULL;
+}
+#endif
 static int fg_op_kept(uint16_t op) {
     switch (op) {
     case RTH_SEMI: case RTH_MASK: case RTH_TWIN: case RTH_MOD: case RTH_PRECISE:
@@ -11671,6 +11719,9 @@ static int fg_op_kept(uint16_t op) {
     case RTH_OFFSET: case RTH_WIDE_VIEW: case RTH_WIDE_TARGET: case RTH_WIDE_DISABLE:
     case RTH_WIDE_CLEAR: case RTH_WIDE_CLEAR_MARGINS: case RTH_PROJ_TRI: case RTH_STATE:
         return 1;
+#ifdef RAGE_GRAPHICS_OPTIONS
+    case RTH_TERRAIN_BATCH: return rage_compact_terrain();
+#endif
     default:
         return 0;
     }
@@ -11833,6 +11884,9 @@ static void fg_capture(const RtCmd *c, const void *payload) {
     case RTH_FLAT_TRI: case RTH_GOURAUD_TRI: case RTH_TEX_TRI: case RTH_SHADED_TEX_TRI:
     case RTH_PROJ_TRI: case RTH_FLAT_RECT: case RTH_TEX_RECT: case RTH_TEX_RECT_SCALED:
     case RTH_LINE: case RTH_SHADED_LINE:
+#ifdef RAGE_GRAPHICS_OPTIONS
+    case RTH_TERRAIN_BATCH:
+#endif
         tb = fg_buf_of(s_area_x1, s_area_y1);
         break;
     default: break;
@@ -11880,6 +11934,9 @@ static void fg_capture(const RtCmd *c, const void *payload) {
     switch (c->op) {   /* a precise override describes one triangle */
     case RTH_FLAT_TRI: case RTH_GOURAUD_TRI: case RTH_TEX_TRI:
     case RTH_SHADED_TEX_TRI: case RTH_PROJ_TRI:
+#ifdef RAGE_GRAPHICS_OPTIONS
+    case RTH_TERRAIN_BATCH:
+#endif
         s_fg_pc_valid = 0;
         s_fg_src_valid = 0;
         break;
@@ -12056,16 +12113,17 @@ static int fg_native_camera_affine(const RageSceneVertex* world,double phase,flo
 static int fg_native_interval(const FgList* older,const FgList* newer) {
     RageSceneVertex cameras[16];int count=0,paired=0;
     for(uint32_t r=0;r<older->n && count<16;++r){
-        FgRec h;memcpy(&h,older->buf+older->off[r],sizeof h);if(h.op!=RTH_PROJ_TRI)continue;
-        RageSceneVertex v=((const PSXProjectedVertex*)(older->buf+older->off[r]+sizeof h))->scene;
+        FgRec h;memcpy(&h,older->buf+older->off[r],sizeof h);
+        const RageSceneVertex* scene=fg_record_scene(h.op,older->buf+older->off[r]+sizeof h);if(!scene)continue;
+        RageSceneVertex v=*scene;
         if(!(v.flags&RAGE_SCENE_CAMERA) || (v.flags&RAGE_SCENE_BACKGROUND))continue;
         int seen=0;for(int i=0;i<count;++i)seen|=cameras[i].node==v.node;
         if(!seen)cameras[count++]=v;
     }
     uint32_t seen[16];int nseen=0;
     for(uint32_t r=0;r<newer->n;++r){
-        FgRec h;memcpy(&h,newer->buf+newer->off[r],sizeof h);if(h.op!=RTH_PROJ_TRI)continue;
-        const RageSceneVertex* v=&((const PSXProjectedVertex*)(newer->buf+newer->off[r]+sizeof h))->scene;
+        FgRec h;memcpy(&h,newer->buf+newer->off[r],sizeof h);
+        const RageSceneVertex* v=fg_record_scene(h.op,newer->buf+newer->off[r]+sizeof h);if(!v)continue;
         if(!(v->flags&RAGE_SCENE_CAMERA) || (v->flags&RAGE_SCENE_BACKGROUND))continue;
         int duplicate=0;for(int i=0;i<nseen;++i)duplicate|=seen[i]==v->node;if(duplicate)continue;
         if(nseen==16)return -1;seen[nseen++]=v->node;
@@ -12196,11 +12254,10 @@ static void fg_replay(const FgList *a, const FgList *b, double t, GLuint gen_wid
     s_fg_native_pose_count=0;
     for(uint32_t record=0;record<b->n;++record){
         FgRec h;memcpy(&h,b->buf+b->off[record],sizeof h);
-        if(h.op!=RTH_PROJ_TRI)continue;
-        PSXProjectedVertex vertex;memcpy(&vertex,b->buf+b->off[record]+sizeof h,sizeof vertex);
-        if(!(vertex.scene.flags&RAGE_SCENE_CAMERA) || (vertex.scene.flags&RAGE_SCENE_BACKGROUND))continue;
-        int seen=0;for(int i=0;i<s_fg_scene_camera_count;++i)if(s_fg_scene_cameras[i].node==vertex.scene.node)seen=1;
-        if(!seen && s_fg_scene_camera_count<16)s_fg_scene_cameras[s_fg_scene_camera_count++]=vertex.scene;
+        const RageSceneVertex* scene=fg_record_scene(h.op,b->buf+b->off[record]+sizeof h);if(!scene)continue;
+        if(!(scene->flags&RAGE_SCENE_CAMERA) || (scene->flags&RAGE_SCENE_BACKGROUND))continue;
+        int seen=0;for(int i=0;i<s_fg_scene_camera_count;++i)if(s_fg_scene_cameras[i].node==scene->node)seen=1;
+        if(!seen && s_fg_scene_camera_count<16)s_fg_scene_cameras[s_fg_scene_camera_count++]=*scene;
     }
     for(int i=0;i<s_fg_scene_camera_count;++i)
         s_fg_camera_affine_valid[i]=rage_scene_camera_affine(s_fg_scene_cameras+i,t,s_fg_camera_affines[i],s_fg_camera_shifts[i]);
@@ -12311,6 +12368,16 @@ static void fg_replay(const FgList *a, const FgList *b, double t, GLuint gen_wid
             if (drawn && !s_fg_replay_objects_only && fg_rect_meets(v[0], v[1], v[2], v[3], disp))
                 glb_fill_rect(v[0], v[1], v[2], v[3], (uint16_t)v[4]);
             break;
+#ifdef RAGE_GRAPHICS_OPTIONS
+        case RTH_TERRAIN_BATCH: {
+            if(in){
+                RageTerrainBatchHeader terrain=*(const RageTerrainBatchHeader*)pl;
+                fg_native_prepare(&terrain.pose,t);
+                rage_terrain_replay(&terrain,(const PSXTerrainTriangle*)((const RageTerrainBatchHeader*)pl+1),h.flags,0);
+            }
+            pc_pending=0;drawn|=in;break;
+        }
+#endif
         case RTH_FLAT_RECT:
             drawn |= in;
             if (in) glb_draw_flat_rect(v[0], v[1], v[2], v[3], (uint16_t)v[4]);
@@ -13085,6 +13152,9 @@ static int fg_generate(double t, int swap) {
     flush_line_batch();
     flush_flat_batch();
     flush_tex_batch();
+#ifdef RAGE_GRAPHICS_OPTIONS
+    rage_native_scene_flush();
+#endif
     /* The strips along a view's edges the picture moved away from: the
      * newer frame drew nothing beyond the edge, so they show it. On the
      * native-wide surface native x maps to x + wide_off. */
@@ -14063,12 +14133,7 @@ static const GpuRenderBackend GL_RT_BACKEND = {
 
 /* ---- replay (render thread) ---------------------------------------------- */
 #ifdef RAGE_GRAPHICS_OPTIONS
-typedef struct RageTerrainBatchHeader {
-    RageSceneVertex pose;
-    uint32_t count, source, unlit, restore_window;
-} RageTerrainBatchHeader;
-static void rage_terrain_replay(const RageTerrainBatchHeader* header,
-    const PSXTerrainTriangle* triangles, uint16_t flags, int capture);
+/* Terrain records retain their shared camera and immutable local payload. */
 #endif
 static void gl_rth_exec(void *user, const RtCmd *c, const void *payload) {
     (void)user;
@@ -14084,9 +14149,11 @@ static void gl_rth_exec(void *user, const RtCmd *c, const void *payload) {
 #ifdef RAGE_GRAPHICS_OPTIONS
     case RTH_TERRAIN_BATCH: {
         const RageTerrainBatchHeader* header=(const RageTerrainBatchHeader*)payload;
+        atomic_fetch_add(&s_native_terrain_records,1);
+        atomic_fetch_add(&s_native_terrain_triangles,header->count);
         if(c->payload>=sizeof(*header) && header->count<=128 &&
            c->payload==sizeof(*header)+header->count*sizeof(PSXTerrainTriangle))
-            rage_terrain_replay(header,(const PSXTerrainTriangle*)(header+1),c->flags,1);
+            rage_terrain_replay(header,(const PSXTerrainTriangle*)(header+1),c->flags,!rage_compact_terrain());
         break;
     }
 #endif

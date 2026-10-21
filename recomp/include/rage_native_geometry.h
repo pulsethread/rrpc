@@ -19,6 +19,9 @@ static inline void rage_native_pack_vertex(float out[16],const float source[32],
     memcpy(out,source+27,12);memcpy(out+3,source+2,8);memcpy(out+5,source+4,12);
     out[8]=source[31]-1;out[9]=(float)pose;
     out[10]=source[13]+(float)((((unsigned)source[26]>>10)&255u)*2u);out[11]=(float)(((int)source[26]&15)|(((int)source[26]&64)?16:0)|(((int)source[26]&128)?32:0)|(((int)source[26]&256)?64:0)|(((int)source[26]&16)?128:0)|(((int)source[26]&512)?256:0));
+    if((unsigned)source[26]&2097152u)out[11]+=4096;
+    if((unsigned)source[26]&8388608u)out[11]+=16384;
+    if((unsigned)source[26]&4194304u)out[11]+=8192;
     if((unsigned)source[26]&1048576u)out[11]+=2048;
     if((unsigned)source[26]&262144u)out[11]+=512;
     if((unsigned)source[26]&524288u)out[11]+=1024;

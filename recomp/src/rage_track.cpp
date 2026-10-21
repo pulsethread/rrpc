@@ -25,6 +25,7 @@
 namespace {
 bool enabled=false;
 std::atomic<int> extended_distance{0},lod_fade{1};
+std::atomic<bool> replay_distance{false};
 std::atomic<uint64_t> fade_starts{0};
 std::atomic<uint64_t> native_views{0};
 std::atomic<uint64_t> native_mirror_views{0};
@@ -50,6 +51,7 @@ std::unordered_map<uint32_t,FadeView> fade_views;
 struct PreparedSector {std::vector<PSXTerrainTriangle> layers[2];};
 using PreparedCourse=std::vector<PreparedSector>;
 std::shared_ptr<PreparedCourse> drawing_prepared;
+std::shared_ptr<PreparedCourse> course_prepared;
 // Like the native port's mesh templates, bake only camera-independent data.
 // Called after all donor clipping, seam repair and decal conformance are done.
 std::shared_ptr<PreparedCourse> prepare_course(const RageTrackCourse& mesh){
@@ -104,6 +106,8 @@ struct View {
     std::shared_ptr<RageTrackCourse> mesh;
     std::shared_ptr<PreparedCourse> prepared;
     bool drawn=false;
+    bool stock_distance=false,stock_cells_valid=false;
+    std::array<bool,1024> stock_cells{};
     std::vector<Packet> packets;
 };
 View pending;
@@ -160,7 +164,7 @@ bool visible(const RageTrackSector& sector,const RageSceneVertex& pose,int left,
         }
         const double x=p[0]*pose.projection[0]+p[2]*pose.projection[2];
         const double y=p[1]*pose.projection[1]+p[2]*pose.projection[3];
-        unsigned mask=(p[2]<8?1u:0u)|(p[2]>rage_track_far_limit()?2u:0u)|
+        unsigned mask=(p[2]<1?1u:0u)|(p[2]>rage_track_far_limit()?2u:0u)|
             (x<left*p[2]?4u:0u)|(x>right*p[2]?8u:0u)|
             (y<top*p[2]?16u:0u)|(y>bottom*p[2]?32u:0u);
         common&=mask;
@@ -180,7 +184,8 @@ extern "C" uint64_t rage_track_fade_starts(){return fade_starts.load(std::memory
 extern "C" uint64_t rage_track_native_views(){return native_views.load(std::memory_order_relaxed);}
 extern "C" uint64_t rage_track_native_mirror_views(){return native_mirror_views.load(std::memory_order_relaxed);}
 extern "C" int rage_track_lod_fade(){return lod_fade.load(std::memory_order_relaxed);}
-extern "C" float rage_track_far_limit(){return rage_track_extended_distance()?196608.f:131072.f;}
+extern "C" float rage_track_far_limit(){return !replay_distance.load(std::memory_order_relaxed) && rage_track_extended_distance()?196608.f:131072.f;}
+extern "C" int rage_track_replay_distance(){return replay_distance.load(std::memory_order_relaxed);}
 
 bool rage_track_decode(CPUState* cpu,uint32_t grid,uint32_t table,uint32_t pool,
                        uint32_t sector_count,RageTrackCourse& out) {
@@ -251,7 +256,7 @@ extern "C" int rage_track_ground_height(float x,float z,float near_y,float* heig
 extern "C" void rage_track_enable(int on) {
     if(enabled==(on!=0))return;
     enabled=on!=0;course.reset();drawing_course.reset();drawing_prepared.reset();views.clear();history.clear();fade_views.clear();pending={};
-    capture_tick=~0u;tick_reader=nullptr;
+    capture_tick=~0u;tick_reader=nullptr;course_prepared.reset();replay_distance=false;
     loads=vertex_count=face_count=draws=submitted=skipped=failures=0;
     rage_sky_reset();
 }
@@ -259,14 +264,16 @@ extern "C" void rage_track_reset(void) {
     rage_sky_reset();
     course.reset();drawing_course.reset();drawing_prepared.reset();views.clear();history.clear();fade_views.clear();pending={};
     course_grid=course_table=course_pool=0;
-    capture_tick=~0u;tick_reader=nullptr;
+    capture_tick=~0u;tick_reader=nullptr;course_prepared.reset();replay_distance=false;
 }
 extern "C" void rage_track_dispatch(CPUState* cpu,uint32_t target) {
     if(!cpu)return;
     target=rage_region_code(target);
+    if((target==0x414f0 || target==0x27ff4) && cpu->read_word)
+        replay_distance.store(cpu->read_word(rage_region_address(0x801e42e4))==17,std::memory_order_relaxed);
     // The retained environment walker has its own stock near/far sector
     // limits. Extend these as well as the reconstructed terrain's range.
-    if(target==0x414f0 && extended_distance.load(std::memory_order_relaxed)){
+    if(target==0x414f0 && !replay_distance.load(std::memory_order_relaxed) && extended_distance.load(std::memory_order_relaxed)){
         const int32_t near_limit=int32_t(cpu->gpr[4]),far_limit=int32_t(cpu->gpr[5]);
         if(near_limit>=-131072 && near_limit<=0 && far_limit>0 && far_limit<=131072){
             cpu->gpr[4]=uint32_t(near_limit*3/2);cpu->gpr[5]=uint32_t(far_limit*3/2);
@@ -275,7 +282,7 @@ extern "C" void rage_track_dispatch(CPUState* cpu,uint32_t target) {
     if(!enabled)return;
     rage_sky_dispatch(cpu,target);
     if(pending.ret && (target==pending.ret || cpu->gpr[29]>pending.sp))finish(cpu);
-    if(target==0x17ad0) {course.reset();drawing_course.reset();drawing_prepared.reset();views.clear();history.clear();fade_views.clear();pending={};rage_sky_reset();return;}
+    if(target==0x17ad0) {course.reset();course_prepared.reset();drawing_course.reset();drawing_prepared.reset();views.clear();history.clear();fade_views.clear();pending={};rage_sky_reset();return;}
     if(target!=0x27ff4 || cpu->gpr[4]!=0x1f800000)return;
     const uint32_t new_tick=cpu->read_word(rage_region_address(0x8009e690));
     if(capture_tick!=new_tick){views.clear();capture_tick=new_tick;pending={};}
@@ -294,16 +301,28 @@ extern "C" void rage_track_dispatch(CPUState* cpu,uint32_t target) {
             }}
         auto scenery=std::make_shared<RageTrackCourse>();
         drawing_course=rage_oval_extend(*loaded,*scenery)?scenery:loaded;
-        drawing_prepared=prepare_course(*drawing_course);
+        course_prepared=prepare_course(*loaded);
+        drawing_prepared=drawing_course==loaded?course_prepared:prepare_course(*drawing_course);
         fade_views.clear();course=std::move(loaded);course_grid=grid;course_table=table;course_pool=pool;
         loads.fetch_add(1,std::memory_order_relaxed);vertex_count=course->vertices.size();face_count=course->faces.size();
         history.clear();
     }
     finish(cpu);
-    pending={};pending.mesh=drawing_course;pending.prepared=drawing_prepared;pending.ctx=cpu->gpr[4];pending.ret=rage_region_code(cpu->gpr[31]);
+    pending={};pending.stock_distance=replay_distance.load(std::memory_order_relaxed);
+    pending.mesh=pending.stock_distance?course:drawing_course;
+    pending.prepared=pending.stock_distance?course_prepared:drawing_prepared;
+    pending.ctx=cpu->gpr[4];pending.ret=rage_region_code(cpu->gpr[31]);
     pending.sp=cpu->gpr[29];pending.start=cpu->read_word(pending.ctx)&0x1fffffffu;
     pending.tick=new_tick;pending.key=pending.ret^(cpu->read_word(pending.ctx+0x68)?0x1000000u:0);
     pending.unlit=cpu->read_word(pending.ctx+0x84)!=0;
+    // Capture exactly the stock renderer's visible sector identities. Native
+    // interpolation reuses this selection rather than extending it off-camera.
+    if(pending.stock_distance){const uint32_t cells=cpu->gpr[5],count=cpu->gpr[6];
+        if(count<=64 && ram(cells,count*16)){pending.stock_cells_valid=true;
+            for(uint32_t i=0;i<count;++i){const int32_t id=int32_t(cpu->read_word(cells+16*i+12));
+                if(id>=0 && id<1023)pending.stock_cells[unsigned(id)]=true;}
+        }
+    }
     const unsigned variant=cpu->read_word(rage_region_address(0x8009e690)+0x14),kind=cpu->read_word(rage_region_address(0x801e42e4)-0x58);
     const uint32_t wanted_address[3]={0x801e6f10,0x801e669c,0x801e6c18};
     const unsigned page=cpu->read_word(wanted_address[rage_active_region]);
@@ -399,7 +418,11 @@ extern "C" int rage_track_submit(uint32_t packet,int dx,int dy,uint32_t texture_
         if(view.drawn)return 1;view.drawn=true;
         auto pose=view.pose;pose.projection[2]+=dx;pose.projection[3]+=dy;
         auto previous=pose;rage_scene_prepare(&previous,0);
-        const bool gpu_clip=(pose.flags&RAGE_SCENE_MIRRORED_VIEW)==0;
+        // A reflected camera changes the view matrix and winding, not the
+        // immutable terrain. Share the prepared/GPU-clipped mesh path with
+        // the main view instead of rebuilding/projecting every mirror face.
+        const char* gpu_mirror=std::getenv("RAGE_GPU_MIRROR");
+        const bool gpu_clip=(pose.flags&RAGE_SCENE_MIRRORED_VIEW)==0 || !gpu_mirror || gpu_mirror[0]!='0';
         const bool prepared=gpu_clip && view.prepared && !std::getenv("RAGE_TRACK_LEGACY_SUBMIT");
         // Retain a guard band and both camera endpoints. Interpolated views
         // can expose a sector outside the newer real frame's exact rectangle.
@@ -428,6 +451,11 @@ extern "C" int rage_track_submit(uint32_t packet,int dx,int dy,uint32_t texture_
         // Record +24 is the original edge-line command/colour, not a decal
         // classification. Every opaque course face must establish scene depth.
         for(int layer=0;layer<2;++layer)for(const auto& sector:view.mesh->sectors) {
+            if(view.stock_distance && view.stock_cells_valid){
+                if(sector.cell_x<0 || sector.cell_z<0)continue;
+                const unsigned id=view.mesh->cell_grid[(31-sector.cell_z)*32+sector.cell_x]&1023u;
+                if(!view.stock_cells[id])continue;
+            }
             if(!visible(sector,pose,left-guard,top-guard,right+guard,bottom+guard) &&
                !(pose.history && visible(sector,previous,left-guard,top-guard,right+guard,bottom+guard)))continue;
             if(prepared){

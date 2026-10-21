@@ -1,4 +1,220 @@
+# Wheel and shadow stability follow-up (0.3.7)
+
+Opaque rotating wheel faces now bypass the original integer-screen winding
+rejection, as body occluders already did. In the diagnostic race, rival front
+and rear wheels used GT4 handler 0x29230 and frequently had integer NCLIP area
+zero. Discarding these faces made the displayed wheel and its light-map caster
+change with the coarse source projection. The unrounded native vertices now
+reach GPU clipping and body/wheel depth testing consistently. The scope covers
+opaque GT4 and opaque flat wheel surfaces; blended flat commands, shadow plates
+and rival far bodies are excluded. Existing EU/JP/US handler mappings are used.
+The original source wheel animation, textures, steering and physics remain.
+
+The shadow map now follows the camera when the player's body is not submitted,
+matching the reference fallback. It no longer assumes that transform palette
+zero belongs to a vehicle: the first palette entry can change between scenery
+and different rival cars as painter order changes. An explicitly tagged player
+part still takes priority. A compiled regression varies the non-player palette
+while requiring the fallback centre to remain unchanged.
+
+Player shadow identification also uses its actual fixed shadow entry (1),
+separately from the rivals' five-entry model assemblies. A player rear-wheel
+or blur bank such as entry 6 must never be classified as a rival shadow plate.
+
+Validation: all twelve compiled contracts pass, including new wheel-stream and
+shadow-entry cases. The 26-second AI/mirror race retained 325248 wheel faces,
+including 292636 whose integer projection collapsed; it reported zero track
+errors and passed all 130 driver probes. Final-build race and 32:9 recorded
+replay checks are in `Port/data/cars037-final-race` and
+`Port/data/cars037-final-replay`. Replay-only stock draw distance remains intact.
+Diagnostic wheel-handler logging was removed before the release build.
+
+# Reference vehicle integration (0.3.6)
+
+Reference sources used exclusively: `src/port/render_world_game.c`,
+`src/main/PAL/main/render/draw_player_car_model.c`,
+`src/render/render_world_frame.c`, `src/render/render_shadow.c`, and
+`src/port/modern/shaders/native_{shadow.vert,color.frag,texture.frag}.glsl`
+in `rage-racer-pc-main`.
+
+Cars retain their individual body, rear axle and two steered front-wheel
+receipts, authored palettes, zone lighting, fog, banked suspension transform,
+steering and speed-dependent wheel/blur banks. The recovered wheel assembly
+already matches the reference's banked wheel-centre calculation; it must not
+receive a second bank rotation. Body and wheel transforms now interpolate in
+world space before the camera is applied, matching Render World's ordering.
+Camera bases and origins are immutable endpoint receipts. Exact real-frame
+endpoints are unchanged. The reference's min(carY,modelY) ground constraint
+applies consistently to the native body/wheel assembly, without changing
+physics or guest GTE state. Ground offsets also retain distinct endpoints.
+
+A 4096-square directional light map now uses captured opaque body and wheel
+geometry, with alpha-tested texture holes. The light direction, 4096 game-unit
+extent and texel-snapped origin follow the reference; PSX vertex coordinates
+are four times game-world units and invert Y/Z relative to the reference's
+render world. The map follows the player when available. Cars visible in main
+and mirror cameras share the same world-space light. Terrain and scenery use
+four-tap bilinear PCF with the reference slope-dependent bias, plus receiver
+plane depth correction. HUD and sky do not receive these shadows.
+
+Integration limit: vehicle materials keep their authored GTE lighting and
+paint rather than receiving the map on their own thin body panels. This
+avoids self-shadow striping in captured retail geometry. The reference's full
+PBR coat/reflection and ray-tracing stack is not imported. Body and wheels
+still cast their actual silhouettes onto the world. The legacy flat plate is
+suppressed when a valid native map is available; classic mode and incomplete
+native scenes retain their existing fallback.
+
+Native scene groups are queued until the next non-scene operation so the light
+pass can precede terrain shading. Retained GPU meshes are pinned until drained;
+only transform palettes are copied. UI, depth-of-field, copies, fills, texture
+replacement, frame completion, resizing and shutdown preserve painter order by
+draining the queue. Material and mesh identities remain independent of camera
+motion. No user settings or assets are replaced. `RAGE_VEHICLE_SHADOWS=0` is an
+internal A/B diagnostic, not a user-facing graphics option.
+
+Validation adds compiled world-space camera-orbit/wheel attachment and light-map
+snapping/mirror-inversion contracts. The driver probe now checks light-depth
+writes, caster rejection, shadow/lit reception and contact bias alongside the
+existing body/wheel occlusion and material probes (130 checks total).
+
+Verified executable SHA-256:
+`6ce0ab1bf66e69eba05e8aba0bf91eea77c11183caceef3fcc32d1a22d46e0ef`.
+The final build also drains pending native work before switching Modern 3D
+on/off; a final race smoke and all 130 driver checks passed after that lifecycle
+change. The full-lap/replay/effects runs precede only this drain-order follow-up.
+All twelve compiled contracts pass. Driver probes pass all 130 checks in a
+16:9 full lap (including 38 native mirror views), a 32:9 recorded replay and 4:3 at 8x scale with screen effects,
+and depth of field. The lap covered 118.907 seconds, roughly 119.1
+output frames/second including generated frames; all 218 sampled track-error
+counts were zero. This is a quality-change validation, not a matched baseline
+speedup claim. Normal extended distance stayed 196608; replay stayed at 131072
+while retaining the user's enabled preference. Evidence is under
+`Port/data/cars036-full-lap`, `cars036-replay-final` and
+`cars036-final43-effects`. Frozen A/B captures verified shadow-map activity and
+an unchanged gauge/HUD region. Intermediate self-shadow experiments were
+rejected; car panels keep their existing lighting in the shipped build.
+
+# Starter clipping and replay visibility (0.3.5)
+
+Native geometry now clips at camera depth 1 rather than 8. An explicit GPU
+clip distance and depth clamp separate this near plane from the existing
+depth mapping, preserving the established road/decal and wheel/body depth
+precision. Geometry behind the one-unit plane still clips. The driver probe
+now checks visible depth-2 geometry and rejected depth-0.5 geometry, alongside
+the existing terrain, layer, filtering and indexed-draw checks.
+
+The reference implements the starter in
+`src/main/PAL/main/track/draw_start_grid_scenery.c` and
+`src/port/render_world_game.c`: a small vertical lift and a dedicated -2048
+depth bias preserve retail ordering against the road. Its native vertex shader
+bounds that bias in world units. The port now carries an explicit starter
+material attribute through retained meshes and applies the same -2048 bias,
+with the reference's quarter-unit scaling and bounded-depth formula. Other
+materials retain their established depth treatment. The original face selection,
+simulation and GTE transform remain intact. Native grounding remains scoped to
+this actor. The temporary source rejection bounds are restored exactly on return.
+Verified 16:9 and 32:9 captures in `Port/data/starter-reference-depth` and
+`Port/data/starter-reference-depth-wide` show both legs continuing to the frame
+edge. This addresses road occlusion rather than assuming the camera near plane
+alone caused the missing legs.
+
+Replays (scene 17) now use the original course mesh and original selected-sector
+list, without the additional native terrain supplement. The 1.5x scenery range
+override is suppressed in replays, and native terrain uses the stock 131072-unit
+far limit regardless of the saved extended-distance preference. Normal racing
+retains its selected 131072/196608 range and native terrain supplement. The
+preference itself is never rewritten. Intermediate frames retain each real
+frame's original replay sector selection.
+
+All ten compiled contracts pass. Driver probes report zero failures.
+`replay-stock-verified` verifies a recorded replay with extended distance enabled:
+the saved option remains 1, effective far range is 131072, and
+`replay_stock_distance` is 1. `starter-final-normal-distance` verifies racing with
+the same option: effective far range 196608 and replay policy 0. Both report
+zero terrain errors. The replay capture retains the road, tunnel and vehicle.
+
+# Native rendering performance (0.3.4)
+
+The only external implementation reference for this work was the supplied
+`rage-racer-pc-main/` tree: `docs/performance-2026-09-07.md`,
+`src/render/render_geometry_pack.c`, and the prepared-mesh/render-world code.
+Its relevant principles are immutable local geometry, independent camera
+transforms, exact indexed payload sharing, bounded residency, and eliminating
+intermediate staging copies. This port retains its own OpenGL backend and
+regional translated game routines.
+
+Terrain now remains in compact sector records throughout frame capture and
+interpolation. Each generated sector prepares its camera once, instead of
+copying and preparing three large scene receipts per triangle. Camera continuity
+checks and world-object placement accept both the compact and original forms.
+The diagnostic `RAGE_COMPACT_TERRAIN=0` retains expanded interpolation records.
+
+Rear-view terrain now shares the prepared/GPU-clipped path with the main view.
+Reflection remains in the original camera matrix; reflected wall winding has
+its own shader flag, and the inset retains its independent depth and scissor.
+`RAGE_GPU_MIRROR=0` retains CPU-clipped mirror submission for comparisons.
+
+Terrain admission writes the final sixteen-float native payload directly,
+eliminating the former thirty-two-float staging array and subsequent repack.
+Dense pose indices retain camera-independent geometry identity. Allocation
+failure reconstructs the compatibility staging payload rather than dropping
+geometry. The geometry cache now has up to 512 entries and a guarded hash
+lookup, with a 32 MiB source-payload budget. Corresponding retained GPU vertex
+and index storage never exceeds expanded source size.
+
+On a cache miss, complete byte-identical vertices share indices while preserving
+triangle order and every UV, material, colour, bound and pose attribute.
+Indexing is selected only when vertices plus indices use less storage than the
+expanded input. Allocation failure retains expanded draws. Index buffers retire
+with their mesh and renderer resources. `RAGE_INDEXED_GEOMETRY=0` selects the
+expanded GPU path. Frame diagnostics expose source/upload bytes, indexed uploads
+and compact terrain record/triangle counts.
+
+Validation on 20 October: the nine compiled rendering contracts pass. The new
+contract compares 131,072 packed terrain payloads byte for byte with the old
+path, reconstructs indexed input exactly, and checks expanded fallback.
+The driver probe compares all 65,536 pixels of independently cleared indexed
+and expanded draws in addition to the existing material/depth/filter checks.
+
+Short moving comparisons used the same private PAL race checkpoint, 16:9,
+4x rendering, 16x anisotropy, 120 Hz target, unchanged effects and native
+25 Hz race updates. Two baseline runs produced approximately 96 and 108
+rendered frames/s; the complete optimization candidate produced approximately
+119. These rates use generated-plus-real frame deltas per native-frame delta
+at 25 Hz, not physical scanout measurements. That is an observed 10–25% gain
+across those comparisons, with substantial baseline variability. Median
+generated-frame CPU times were 4.536/3.468 ms before and 2.738 ms after;
+this is not a guarantee of a 120 FPS floor. One 30-second optimized run uploaded
+726,604,524 bytes of resident geometry versus its 1,096,450,752-byte expanded
+equivalent, about 34% less. This measures mesh uploads, not all GPU traffic.
+
+Development evidence is retained under `Port/data/perf-reference-*`, including
+the intermediate experiments, captures and executable hashes. The optional
+instruction sampler was enabled only in `perf-reference-host`; that run is
+excluded from FPS comparisons. Visual route captures cover both tunnels and
+main/mirror terrain. Resolution, texture filtering, draw distance, car detail
+and simulation timing were not reduced to obtain these results.
+
+The final 0.3.4 executable completed the checkpoint-to-checkpoint lap in
+124.515 seconds, returning from route segment 296 to 296 after a wrap, with
+zero terrain errors. Its rendered-frame counter rate was approximately
+119.48/s over the lap, median generated-frame CPU time was 2.589 ms, and
+resident geometry uploads were 34.55% smaller than their expanded equivalent.
+The first comparison section measured approximately 119.35/s, corroborating
+the short candidate run. The actual-driver indexed/material/depth probe
+reported zero failures. Evidence: `perf-reference-release-lap/`.
+
 # Native replay and texture-fragment fixes
+
+Race countdown correction (20 October): flat HUD rectangles now retain fractional
+horizontal coordinates through the projected UI path, using the same anchor as
+textured HUD pieces. The countdown's 2x1 LED cells previously rounded to whole
+320-space pixels, merging their one-pixel gaps into bars at wide aspects.
+The game rebuilt successfully; isolated race captures at 4:3, 16:9, 21:9 and
+32:9 preserve the dotted grid and board proportions. Captures are retained in
+`Port/data/countdown-fix-*`. The previous playable executable is backed up in
+`Port/data/countdown-fix-backup`.
 
 Native scene replay verifies and reuses retained meshes before computing a
 content hash, and avoids redundant projected-vertex copies and CRT clamps.

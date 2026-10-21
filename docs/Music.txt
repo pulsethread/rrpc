@@ -15,11 +15,17 @@ file=MySong.mp3
 Add song.12, song.13, etc. for further songs (through song.99). Filenames are
 relative to music; spaces and subfolders are supported. Quoted values work.
 Use the left/right controls in pre-race MUSIC SELECT to scroll through the
-original and custom songs. Changing selection gives you more time to choose.
+original and custom songs. Press your accelerate button to confirm the song
+and continue to the race. The selector waits until you confirm; release a held
+accelerate button before pressing it again.
 Changes to songs.ini are read when the next pre-race screen opens.
 
-Names use the original game's ASCII font. The selector displays up to18
-characters of a title. Use MP3 files up to20minutes long. Missing files or
+Names support up to 160 characters using the original game's ASCII font.
+The selector displays an 18-character window: it pauses for one second at the
+start, advances one character every 0.3 seconds until the end is visible,
+pauses for one second, then scrolls back. This repeats while selected.
+Changing songs resets the title to its beginning. Use MP3 files up to20minutes
+long. Missing files or
 unsupported audio formats are skipped. RANDOM PLAY retains the original
 game's built-in shuffle pool; select a custom song explicitly to play it.
 

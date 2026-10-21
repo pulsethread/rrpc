@@ -5794,8 +5794,12 @@ static void gp0_exec_mono_rect(void) {
                            y0<=0 && y0+h>=ws_disp_h();
     ws_expand_fullscreen_rect(&x0, y0, &w, h);
 #ifdef RAGE_GRAPHICS_OPTIONS
-    if(!fullscreen && ws_active() && ws_hud_sprt && rage_scene_full_width() && !rage_scene_racing() && gl_renderer_projective_supported()){
-        const double scale=(double)ws_xnum/ws_xden,anchor=ws_disp_x()+ws_disp_w()*.5;
+    /* The countdown LEDs are 2x1 TILEs separated by one source pixel.
+     * Preserve their fractional edges just like the textured lamp sprites;
+     * integer width rounding otherwise fills the gaps at wide aspects. */
+    int32_t precise_anchor;
+    if(!fullscreen && w>0 && h>0 && ws_projection_hud_anchor(&precise_anchor) && gl_renderer_projective_supported()){
+        const double scale=(double)ws_xnum/ws_xden,anchor=precise_anchor;
         const double left=anchor+(x0-anchor)*scale+draw_offset_x,right=left+w*scale;
         PSXProjectedVertex v[4]={0};
         for(int k=0;k<4;++k){v[k].x=((k&1)?right:left)*256;v[k].y=(y0+draw_offset_y+((k&2)?h:0))*256.;v[k].z=256;

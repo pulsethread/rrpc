@@ -91,6 +91,7 @@ static void rage_dof_target(GLuint target,int x,int y,int w,int h,int slot){
 }
 /* Resolve completed 3D views before the first interface batch. */
 static void rage_dof_before_interface(void){
+    rage_native_scene_flush();
     if(!s_rage_dof||!s_scene_depth_owned||s_hiw)return;
     if(!s_rage_dof_program)s_rage_dof_program=build_program(RAGE_EFFECT_VS,RAGE_DOF_FS);
     if(!s_rage_dof_program)return;

@@ -102,7 +102,7 @@ void save() {
 LRESULT CALLBACK menu_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
     if(message==WM_COMMAND && LOWORD(wparam)==base+200){
         rage_graphics_menu_pause(1);
-        MessageBoxW(hwnd,L"Rage Racer - PC\nVersion 0.3.3\nBuild: " RAGE_WIDE(__DATE__) L" " RAGE_WIDE(__TIME__)
+        MessageBoxW(hwnd,L"Rage Racer - PC\nVersion 0.3.8\nBuild: " RAGE_WIDE(__DATE__) L" " RAGE_WIDE(__TIME__)
             L"\n\nOriginal Rage Racer game: Namco\nPC adaptation: Rage Racer PC project\nRecompilation framework: PSXRecomp by Matthew Stanley and contributors\nBIOS: OpenBIOS contributors\n\nLibraries and tools:\nSDL 3, libchdr, libwebp, zlib, zstd, miniz, LZMA SDK\nfmt, toml11, Rabbitizer, ELFIO, stb\nOpenGL and the Windows SDK\nAudio: minimp3 by lieff and contributors (CC0)\nMP3 encoding in Generate Data: LAME (LGPL)\nhttps://lame.sourceforge.io/\n\nLocal source contributions:\nRage Racer PC: retained textures, mesh templates and render submission\n\nResearch references:\nkhasinski: Rage Racer Decomp and Rage Racer PC\n\nThank you to the authors and contributors of these projects.\nOriginal game assets remain the property of their respective owners.",
             L"About Rage Racer - PC",MB_OK|MB_ICONINFORMATION);
         rage_graphics_menu_pause(0);return 0;

@@ -7,6 +7,7 @@ struct CPUState;
 void rage_track_enable(int on);
 void rage_track_set_extended_distance(int on);
 int rage_track_extended_distance(void);
+int rage_track_replay_distance(void);
 float rage_track_far_limit(void);
 void rage_track_set_lod_fade(int on);
 int rage_track_lod_fade(void);

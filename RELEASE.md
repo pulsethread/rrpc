@@ -1,11 +1,33 @@
-# Release 0.3.3
+# Release 0.3.8
 
-This source includes the native terrain rendering improvements, mirror and replay
-terrain opacity fix, full-width replays, MP3 disc audio, and configurable music
-selection. Build the game and generator with `Build.ps1`.
+Music selection now waits for a fresh press of the mapped accelerator button.
+Long titles scroll through an 18-character window, resting at either end for
+one second and advancing one character every 0.3 seconds. Changing songs resets
+the scroll. Digital and NeGcon accelerator assignments are respected.
+
+Validation: all 13 native contract tests passed, including exact scroll timing
+boundaries. A live PAL selector test verified scrolling in both directions,
+selection reset, waiting beyond the old timeout, ignoring accelerate held on
+entry, and confirming with a remapped accelerator before entering the race.
+
+The 0.3.7 follow-up stabilizes AI wheel geometry and cast shadows by retaining
+opaque wheel faces through the original integer-screen winding test and using
+a stable camera anchor when the player's body is off-screen. Player wheel/blur
+banks are also kept separate from legacy shadow-plate identification.
+
+This release adapts reference car rendering to the native renderer: body and
+wheel motion is interpolated in world space, the assembled car respects the
+reference ground constraint, and body/wheel geometry casts directional shadows
+onto terrain and scenery. Existing car paint, steering, banked suspension,
+wheel animation and GTE lighting remain. Vehicle self-shadowing, the reference
+PBR/reflection shaders and ray tracing are not included.
+
+Previous terrain performance improvements, starter clipping fixes, replay-only
+PS1 draw distance, full-width rendering and MP3/custom music remain included.
+Build the game and generator with `Build.ps1`.
 
 The current verified game executable has SHA-256:
-`9d97fbed811850ede93726248d42fc892d93a4e5bb15737232e2032d16690706`.
+`64a90c28ef826758a82c48928c5528328e9f863495948e422fa90af33a155cdf`.
 The unchanged audio generator has SHA-256:
 `ec77e654aa784a6dd306849158135b227e56d78341632dd4c6219b4cd207096a`.
 Rebuilding can change executable hashes because build timestamps are embedded.

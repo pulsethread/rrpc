@@ -10707,7 +10707,7 @@ static void handle_render_thread(int id, const char *json)
 #ifdef RAGE_GRAPHICS_OPTIONS
 static void handle_native_material_probe(int id,const char* json) {
     (void)json;const int failures=gl_renderer_native_material_probe();
-    send_fmt("{\"id\":%d,\"ok\":%s,\"samples\":125,\"failures\":%d}",id,failures==0?"true":"false",failures);
+    send_fmt("{\"id\":%d,\"ok\":%s,\"samples\":130,\"failures\":%d}",id,failures==0?"true":"false",failures);
 }
 #endif
 static void handle_frame_gen(int id, const char *json)
@@ -10729,15 +10729,21 @@ static void handle_frame_gen(int id, const char *json)
     const size_t region_used=strlen(buf);snprintf(buf+region_used,sizeof buf-region_used,",\"material_region_repairs\":%llu",(unsigned long long)gl_renderer_native_material_region_count());
     extern uint64_t rage_scene_actor_groundings(void);
     extern uint64_t rage_scene_tread_faces(void);
+    extern void rage_scene_wheel_visibility(uint64_t out[2]);uint64_t wheel_visibility[2];rage_scene_wheel_visibility(wheel_visibility);
+    {size_t used=strlen(buf);snprintf(buf+used,sizeof buf-used,",\"wheel_faces_retained\":%llu,\"wheel_faces_integer_collapsed\":%llu",(unsigned long long)wheel_visibility[0],(unsigned long long)wheel_visibility[1]);}
     const size_t tread_used=strlen(buf);snprintf(buf+tread_used,sizeof buf-tread_used,",\"tyre_shell_faces\":%llu",(unsigned long long)rage_scene_tread_faces());
     extern int rage_scene_actor_lift_milli(void);
     const size_t actor_used=strlen(buf);snprintf(buf+actor_used,sizeof buf-actor_used,",\"actor_groundings\":%llu,\"actor_lift_milli\":%d",(unsigned long long)rage_scene_actor_groundings(),rage_scene_actor_lift_milli());
     extern int rage_track_extended_distance(void);
+    extern int rage_track_replay_distance(void);
     extern int rage_track_lod_fade(void);
     extern uint64_t rage_track_fade_starts(void);
     extern uint64_t rage_track_native_views(void);
     extern uint64_t rage_track_native_mirror_views(void);
     extern unsigned rage_music_selection(void);
+    extern unsigned rage_music_title_position(void);
+    extern int rage_music_waiting_confirmation(void);
+    {const size_t n=strlen(buf);snprintf(buf+n,sizeof buf-n,",\"music_title_position\":%u,\"music_waiting_confirmation\":%d",rage_music_title_position(),rage_music_waiting_confirmation());}
     extern unsigned rage_music_song_count(void);
     extern uint32_t rage_music_custom_sectors(void);
     extern uint64_t rage_music_custom_reads(void);
@@ -10746,6 +10752,7 @@ static void handle_frame_gen(int id, const char *json)
     extern float rage_track_far_limit(void);
     const size_t fade_used=strlen(buf);snprintf(buf+fade_used,sizeof buf-fade_used,",\"lod_fade\":%d,\"track_fade_starts\":%llu",rage_track_lod_fade(),(unsigned long long)rage_track_fade_starts());
     const size_t range_used=strlen(buf);snprintf(buf+range_used,sizeof buf-range_used,",\"extended_distance\":%d,\"track_far_limit\":%.0f",rage_track_extended_distance(),rage_track_far_limit());
+    {const size_t n=strlen(buf);snprintf(buf+n,sizeof buf-n,",\"replay_stock_distance\":%d",rage_track_replay_distance());}
     const size_t publication_used=strlen(buf);snprintf(buf+publication_used,sizeof buf-publication_used,",\"track_native_views\":%llu",(unsigned long long)rage_track_native_views());
     const size_t mirror_publication_used=strlen(buf);snprintf(buf+mirror_publication_used,sizeof buf-mirror_publication_used,",\"track_native_mirror_views\":%llu",(unsigned long long)rage_track_native_mirror_views());
     extern int rage_scene_original_lod(void);
@@ -10754,6 +10761,12 @@ static void handle_frame_gen(int id, const char *json)
     const size_t used=strlen(buf);snprintf(buf+used,sizeof buf-used,",\"sky_packets\":%llu,\"sky_triangles\":%llu,\"view_depth_clears\":%llu",
         (unsigned long long)sky_packets,(unsigned long long)sky_triangles,(unsigned long long)gl_renderer_native_view_clear_count());
     uint64_t native_uploads=0,native_hits=0,native_draws=0,native_camera=0;gl_renderer_native_scene_stats(&native_uploads,&native_hits,&native_draws,&native_camera);
+    extern void gl_renderer_native_efficiency(uint64_t out[5]);
+    uint64_t efficiency[5];gl_renderer_native_efficiency(efficiency);
+    extern void gl_renderer_vehicle_shadow_stats(uint64_t out[3]);uint64_t shadows[3];gl_renderer_vehicle_shadow_stats(shadows);
+    {size_t used=strlen(buf);snprintf(buf+used,sizeof buf-used,",\"vehicle_shadow_maps\":%llu,\"vehicle_shadow_casters\":%llu,\"vehicle_shadow_receivers\":%llu",(unsigned long long)shadows[0],(unsigned long long)shadows[1],(unsigned long long)shadows[2]);}
+    {const size_t n=strlen(buf);snprintf(buf+n,sizeof buf-n,",\"geometry_source_bytes\":%llu,\"geometry_upload_bytes\":%llu,\"indexed_uploads\":%llu,\"terrain_batch_records\":%llu,\"terrain_batch_triangles\":%llu",
+        (unsigned long long)efficiency[0],(unsigned long long)efficiency[1],(unsigned long long)efficiency[2],(unsigned long long)efficiency[3],(unsigned long long)efficiency[4]);}
     uint64_t materials=0,material_triangles=0,invalidated=0;gl_renderer_scene_material_stats(&materials,&material_triangles,&invalidated);
     send_fmt("{\"id\":%d,\"ok\":true,\"track_loads\":%llu,\"track_vertices\":%llu,\"track_faces\":%llu,\"track_draws\":%llu,\"track_triangles\":%llu,\"track_packets_replaced\":%llu,\"track_errors\":%llu,\"native_mesh_uploads\":%llu,\"native_mesh_reuses\":%llu,\"native_scene_draws\":%llu,\"native_camera_placements\":%llu,\"material_decodes\":%llu,\"material_triangles\":%llu,\"material_invalidations\":%llu,\"scene_poses\":%llu,\"wheel_poses\":%llu,\"scene_paired\":%llu,\"host_3d\":%d,\"projected_polygons\":%llu,\"fallback_polygons\":%llu,%s}",
         id,(unsigned long long)tl,(unsigned long long)tv,(unsigned long long)tf,(unsigned long long)td,
