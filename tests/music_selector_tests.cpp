@@ -3,18 +3,18 @@
 #include "rage_boot_notice.h"
 #include <cassert>
 int main(){
-    for(unsigned t=0;t<10000;++t)assert(rage_music_title_offset(18,t)==0);
-    assert(rage_music_title_offset(20,999)==0);
-    assert(rage_music_title_offset(20,1000)==1);
-    assert(rage_music_title_offset(20,1149)==1);
-    assert(rage_music_title_offset(20,1150)==2);
-    assert(rage_music_title_offset(20,2149)==2);
-    assert(rage_music_title_offset(20,2150)==1);
-    assert(rage_music_title_offset(20,2300)==0);
-    assert(rage_music_title_offset(19,999)==0);
-    assert(rage_music_title_offset(19,1000)==1);
-    assert(rage_music_title_offset(19,2000)==0);
-    for(unsigned t=0;t<100000;++t)assert(rage_music_title_offset(160,t)<=142);
+    for(unsigned t=0;t<10000;++t)assert(rage_music_title_offset(20,t)==0);
+    assert(rage_music_title_offset(22,999)==0);
+    assert(rage_music_title_offset(22,1000)==1);
+    assert(rage_music_title_offset(22,1149)==1);
+    assert(rage_music_title_offset(22,1150)==2);
+    assert(rage_music_title_offset(22,2149)==2);
+    assert(rage_music_title_offset(22,2150)==1);
+    assert(rage_music_title_offset(22,2300)==0);
+    assert(rage_music_title_offset(21,999)==0);
+    assert(rage_music_title_offset(21,1000)==1);
+    assert(rage_music_title_offset(21,2000)==0);
+    for(unsigned t=0;t<100000;++t)assert(rage_music_title_offset(160,t)<=140);
     RageMusicConfirmation gate;
     assert(!gate.update(true));assert(!gate.update(true));
     assert(!gate.update(false));assert(gate.update(true));assert(gate.update(false));

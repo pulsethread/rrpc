@@ -1,4 +1,8 @@
-# Release 0.3.9
+# Release 0.3.10
+
+The music selector now displays 20 title characters, using the two spaces
+freed by removing quotation marks. Titles of up to 20 characters stay static;
+longer names retain 0.15-second scrolling steps and one-second endpoint pauses.
 
 Song titles display without surrounding quotation marks and scroll one letter
 every 0.15 seconds, retaining the one-second pauses at either end. The PAL boot
@@ -6,7 +10,7 @@ notice is skipped while preserving the following display setup, Namco logo,
 asset loading and intro. Regions without that notice keep their normal boot.
 
 Music selection now waits for a fresh press of the mapped accelerator button.
-Long titles scroll through an 18-character window, resting at either end for
+Long titles scroll through an 20-character window, resting at either end for
 one second and advancing one character every 0.15 seconds. Changing songs resets
 the scroll. Digital and NeGcon accelerator assignments are respected.
 
@@ -33,7 +37,7 @@ PS1 draw distance, full-width rendering and MP3/custom music remain included.
 Build the game and generator with `Build.ps1`.
 
 The current verified game executable has SHA-256:
-`bc4f381ad0d940ab3414bf6b0c2b0f1bd5438c7e0832bdbb920c4a982e1b9a70`.
+`f635e68958c54af6f19924d679b6de7921fe7c74ccb7b6f02610b6680d34c8d7`.
 The unchanged audio generator has SHA-256:
 `ec77e654aa784a6dd306849158135b227e56d78341632dd4c6219b4cd207096a`.
 Rebuilding can change executable hashes because build timestamps are embedded.

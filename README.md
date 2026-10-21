@@ -104,7 +104,7 @@ Custom songs are configured in songs.ini beside RageRacer.exe. Add [song.11]
 with name=MY SONG and file=MySong.mp3, placing the MP3 inside music/. Select it
 with left/right on pre-race MUSIC SELECT. Use 44.1kHz stereo MP3, up to 20 minutes.
 Changes are read at the next pre-race screen. Titles support up to 160 ASCII
-characters without surrounding quotation marks and scroll through an 18-character
+characters without surrounding quotation marks and scroll through an 20-character
 window, pausing for one second at either end and advancing one character every
 0.15 seconds. Press your mapped
 accelerate button to confirm the song and continue. Random Play retains the original built-in shuffle
@@ -113,8 +113,8 @@ See docs/Music.txt for the exported original song/CD-number mappings.
 
 See RELEASE.md for the current release and minimal portable folder contents.
 
-Download the two Windows executables from the [v0.3.9 release](https://github.com/pulsethread/rrpc/releases/tag/v0.3.9),
-packaged as `RageRacer-PC-v0.3.9.zip`. Extract the ZIP, run `Generate Data.exe`
+Download the two Windows executables from the [v0.3.10 release](https://github.com/pulsethread/rrpc/releases/tag/v0.3.10),
+packaged as `RageRacer-PC-v0.3.10.zip`. Extract the ZIP, run `Generate Data.exe`
 to create `data.dat` from your supported game disc or image, then run `RageRacer.exe`.
 
 A decent portion of this codebase was developed using AI, so expect bugs!

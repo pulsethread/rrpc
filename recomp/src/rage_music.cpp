@@ -124,7 +124,7 @@ extern "C" void rage_music_dispatch(CPUState* cpu,uint32_t raw_target){
         draw_return=rage_region_code(cpu->gpr[31]);draw_sp=sp;return;
     }
     if(target==0x16754 && draw_return && sp==draw_sp-160 && cpu->gpr[5]==0xce){
-        if(cpu->gpr[4]==0x90)text_argument(cpu,songs[selected].name.substr(rage_music_title_offset(songs[selected].name.size(),GetTickCount64()-title_started),18));
+        if(cpu->gpr[4]==0x90)text_argument(cpu,songs[selected].name.substr(rage_music_title_offset(songs[selected].name.size(),GetTickCount64()-title_started),rage_music_title_width));
         else if(cpu->gpr[4]==0x74 || cpu->gpr[4]==0x78)text_argument(cpu,std::to_string(selected));
     }
 }

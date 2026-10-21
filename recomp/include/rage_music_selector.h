@@ -3,9 +3,10 @@
 #include <cstdint>
 
 // Each endpoint rests for one second; intermediate characters last 150 ms.
+inline constexpr size_t rage_music_title_width=20;
 inline size_t rage_music_title_offset(size_t length,uint64_t elapsed){
-    if(length<=18)return 0;
-    const size_t distance=length-18;
+    if(length<=rage_music_title_width)return 0;
+    const size_t distance=length-rage_music_title_width;
     const uint64_t travel=(distance-1)*150;
     const uint64_t phase=elapsed%(2000+2*travel);
     if(phase<1000)return 0;
