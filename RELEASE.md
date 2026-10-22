@@ -1,3 +1,15 @@
+# Release 0.3.22
+
+Add a live minimap at the middle left of the racing view. The complete track
+centreline is white, the player is a blue directional arrow, and active AI cars
+are red dots. Car positions update each race tick, including off-screen AI.
+The transparent map scales with the displayed game area and stays separate
+from mirror views, with outlined markers for contrast on bright roads.
+
+Validation: all 15 native tests passed, including minimap fitting and cardinal
+headings. Live race captures verified placement at 4:3, 16:9 and 32:9; all 162
+graphics checks passed. Original game data, saves and settings are unchanged.
+
 # Release 0.3.21
 
 This release combines the rendering improvements since v0.3.10: cached GPU mesh
@@ -159,7 +171,7 @@ PS1 draw distance, full-width rendering and MP3/custom music remain included.
 Build the game and generator with `Build.ps1`.
 
 The current verified game executable has SHA-256:
-`74578c88f64325a4064e7a2dd5317b265af567f9a07231ebc6f2ea33238dafc1`.
+`fcb8d044aa0d6dadc971175e9e9cf967a6ff51e617631a81621559b5670ebbf1`.
 The unchanged audio generator has SHA-256:
 `ec77e654aa784a6dd306849158135b227e56d78341632dd4c6219b4cd207096a`.
 Rebuilding can change executable hashes because build timestamps are embedded.

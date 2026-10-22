@@ -6,6 +6,7 @@
 #include "rage_track_visibility.h"
 #include "native_terrain_publication.h"
 #include "rage_scene.h"
+#include "rage_minimap.h"
 #include "cpu_state.h"
 #include "execution_profile.h"
 #include "native_terrain_mirror.h"
@@ -261,6 +262,7 @@ extern "C" void rage_track_enable(int on) {
     rage_sky_reset();
 }
 extern "C" void rage_track_reset(void) {
+    rage_minimap_clear();
     rage_sky_reset();
     course.reset();drawing_course.reset();drawing_prepared.reset();views.clear();history.clear();fade_views.clear();pending={};
     course_grid=course_table=course_pool=0;
@@ -282,7 +284,7 @@ extern "C" void rage_track_dispatch(CPUState* cpu,uint32_t target) {
     if(!enabled)return;
     rage_sky_dispatch(cpu,target);
     if(pending.ret && (target==pending.ret || cpu->gpr[29]>pending.sp))finish(cpu);
-    if(target==0x17ad0) {course.reset();course_prepared.reset();drawing_course.reset();drawing_prepared.reset();views.clear();history.clear();fade_views.clear();pending={};rage_sky_reset();return;}
+    if(target==0x17ad0) {rage_minimap_clear();course.reset();course_prepared.reset();drawing_course.reset();drawing_prepared.reset();views.clear();history.clear();fade_views.clear();pending={};rage_sky_reset();return;}
     if(target!=0x27ff4 || cpu->gpr[4]!=0x1f800000)return;
     const uint32_t new_tick=cpu->read_word(rage_region_address(0x8009e690));
     if(capture_tick!=new_tick){views.clear();capture_tick=new_tick;pending={};}
@@ -304,9 +306,13 @@ extern "C" void rage_track_dispatch(CPUState* cpu,uint32_t target) {
         course_prepared=prepare_course(*loaded);
         drawing_prepared=drawing_course==loaded?course_prepared:prepare_course(*drawing_course);
         fade_views.clear();course=std::move(loaded);course_grid=grid;course_table=table;course_pool=pool;
+        std::vector<float> map_points;map_points.reserve(course->route.size()*2);
+        for(const auto& p:course->route){map_points.push_back(p.x);map_points.push_back(p.z);}
+        rage_minimap_route(map_points.data(),int(course->route.size()));
         loads.fetch_add(1,std::memory_order_relaxed);vertex_count=course->vertices.size();face_count=course->faces.size();
         history.clear();
     }
+    rage_minimap_capture(cpu);
     finish(cpu);
     pending={};pending.stock_distance=replay_distance.load(std::memory_order_relaxed);
     pending.mesh=pending.stock_distance?course:drawing_course;

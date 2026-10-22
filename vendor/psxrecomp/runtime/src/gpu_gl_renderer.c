@@ -9424,16 +9424,16 @@ static void pass_apply_promotion(void) {
 /* Draw one host OSD ARGB image into the default framebuffer at (vx,vy)
  * in top-left window coordinates (y down). Bitmap is ow×oh; viewport is
  * dw×dh (may upscale for HiDPI / large windows). */
-static void gl_draw_osd_image(const uint32_t *px, int ow, int oh,
-                              int dw, int dh, int vx, int vy, int ww, int wh) {
+static void gl_draw_osd_image_mode(const uint32_t *px, int ow, int oh,
+                              int dw, int dh, int vx, int vy, int ww, int wh,int transparent) {
     if (!px || ow <= 0 || oh <= 0 || dw <= 0 || dh <= 0 ||
         !s_present_prog || ww <= 0 || wh <= 0)
         return;
     if (!s_osd_tex) glGenTextures(1, &s_osd_tex);
     p_glActiveTexture(PSXGL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, s_osd_tex);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, transparent?GL_LINEAR:GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, transparent?GL_LINEAR:GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     if (s_osd_tw != ow || s_osd_th != oh) {
@@ -9457,6 +9457,7 @@ static void gl_draw_osd_image(const uint32_t *px, int ow, int oh,
     glDisable(GL_BLEND);
     if (p_glBlendEquationSeparate)
         p_glBlendEquationSeparate(PSXGL_FUNC_ADD, PSXGL_FUNC_ADD);
+    if(transparent){glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);}
     /* GL viewport origin is bottom-left. */
     glViewport(vx, wh - vy - dh, dw, dh);
     p_glUseProgram(s_present_prog);
@@ -9474,7 +9475,28 @@ static void gl_draw_osd_image(const uint32_t *px, int ow, int oh,
         p_glBindVertexArray(0);
     }
     p_glUseProgram(0);
+    glDisable(GL_BLEND);
 }
+
+static void gl_draw_osd_image(const uint32_t *px,int ow,int oh,int dw,int dh,int vx,int vy,int ww,int wh){
+    gl_draw_osd_image_mode(px,ow,oh,dw,dh,vx,vy,ww,wh,0);
+}
+
+#ifdef RAGE_GRAPHICS_OPTIONS
+#include "rage_minimap.h"
+static void rage_minimap_present(void){
+    static uint32_t pixels[RAGE_MINIMAP_SIZE*RAGE_MINIMAP_SIZE];
+    if(!s_ctx || !s_present_prog || !rage_minimap_image(pixels,RAGE_MINIMAP_SIZE*RAGE_MINIMAP_SIZE))return;
+    int ww=0,wh=0;SDL_GL_GetDrawableSize(s_win,&ww,&wh);if(ww<1||wh<1)return;
+    GLint viewport[4];glGetIntegerv(GL_VIEWPORT,viewport);
+    const int height=viewport[3]>0?viewport[3]:wh,width=viewport[2]>0?viewport[2]:ww;
+    int size=(int)(height*.23f);if(size<80)size=80;if(size>260)size=260;if(size>width/3)size=width/3;
+    int margin=(int)(height*.025f);if(margin<8)margin=8;
+    int x=viewport[0]+margin,y=wh-viewport[1]-height+(height-size)/2;
+    gl_draw_osd_image_mode(pixels,RAGE_MINIMAP_SIZE,RAGE_MINIMAP_SIZE,size,size,x,y,ww,wh,1);
+    glViewport(viewport[0],viewport[1],viewport[2],viewport[3]);
+}
+#endif
 
 /* Composite host toast + volume bar into the default framebuffer, then swap. */
 /* ---- presented-image ring feed (debug tools) ------------------------------
@@ -9823,6 +9845,9 @@ static void fg_note_swap(uint64_t ns);
 static void gl_swap_with_osd(void) {
     openxr_present_native(); /* Copy guest content before host-only overlays. */
     s_native_surface_pending=0; /* Hold-last/resim cannot reuse a native source. */
+#ifdef RAGE_GRAPHICS_OPTIONS
+    rage_minimap_present();
+#endif
 #ifndef PSX_NO_DEBUG_TOOLS
     if (s_ctx) present_image_ring_capture_gl();
 #endif

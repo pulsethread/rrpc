@@ -1,3 +1,18 @@
+# Live race minimap (0.3.22)
+
+Read the complete centreline already decoded with each course and cache an
+antialiased white track bitmap. A uniform X/Z fit preserves course shape.
+Capture player position/yaw and all 11 rival records once per race tick, filtering
+the original activeFlag/aiEnabled fields. Regional rival array bases are verified
+against the generated EU/JP/US code, rather than assuming a common RAM offset.
+
+CPU-owned ARGB images are published under a mutex; the OpenGL presenter never
+reads guest RAM. Composite the transparent map once into each presented frame,
+at middle left within the fitted game area, before host menus and notifications.
+Keep existing opaque OSD behaviour; only the minimap path enables alpha blending
+and linear texture filtering. No new GL objects or game resources are required.
+The map is cleared on track reset and hidden in non-race terrain views.
+
 # Animation-ordered AI trails (0.3.21)
 
 A captured trace showed future real-frame lamps being submitted between older

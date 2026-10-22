@@ -8,6 +8,7 @@ inline void rage_region_select(const char* id) {
         (!std::strcmp(id,"SLUS-00403") || !std::strcmp(id,"SLUS_004.03"))?2:0;
 }
 inline constexpr uint32_t rage_region_addresses[][3]={
+{0x801f1854u,0x801f2c00u,0x801f317cu},
 {0x8009e698u,0x8009de28u,0x8009e3a0u},
 {0x8009e6d4u,0x8009de64u,0x8009e3dcu},
 {0x8007c464u,0x8007bda8u,0x8007c174u},
