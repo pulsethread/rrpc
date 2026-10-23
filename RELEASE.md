@@ -1,3 +1,18 @@
+# Release 0.3.28
+
+Fixes shoulder buttons showing through the PlayStation digital-controller models on the Multiplayer screen.
+
+- Move L1/R1 and L2/R2 onto the rear/top edge of each controller.
+- Render the shoulder controls behind the front shell so their buried bases stay hidden during animation.
+
+### Windows download
+
+Extract `RageRacer-PC-v0.3.28.zip` into your game folder, replacing the supplied program files. Keep your existing `data.dat`, saves, settings, music and mods. The data generator is unchanged. No original game data is included.
+
+### Validation
+
+All 18 native tests passed, including shoulder placement and drawing-order checks. Live menu navigation and the 162-check GPU probe passed. Multiplayer remains a menu foundation; network play is not implemented.
+
 # Release 0.3.27
 
 Adds the Multiplayer menu foundation and original PlayStation digital-controller models.

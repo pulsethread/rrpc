@@ -14,6 +14,13 @@ int main(){
         assert(n.x*n.x+n.y*n.y+n.z*n.z>.00001);
         for(auto p:face.p){double v[3]={p.x,p.y,p.z};for(int k=0;k<3;++k){assert(std::isfinite(v[k]));lo[k]=std::min(lo[k],v[k]);hi[k]=std::max(hi[k],v[k]);}}}
     assert(hi[0]-lo[0]>130 && hi[1]-lo[1]>120 && hi[2]-lo[2]>24 && hi[2]<=17);
+    size_t shoulders=0;
+    for(const auto& face:mesh)if(face.colour==0x292724 || face.colour==0x1e1c1a){
+        assert(face.layer<0);
+        for(auto p:face.p)assert(p.z<=6 && p.y>=34);
+        ++shoulders;
+    }
+    assert(shoulders==48); // Four complete shoulder buttons, behind the face.
     CPUState cpu{};cpu.read_word=read;cpu.write_word=write;
     for(unsigned region=0;region<3;++region){rage_active_region=region;
         std::vector<uint8_t> first;

@@ -66,10 +66,14 @@ inline Mesh build(){
     for(int r=0;r<3;++r)for(size_t i=0;i<outline.size();++i){const auto j=(i+1)%outline.size();
         quad(m,rings[r][i],rings[r][j],rings[r+1][j],rings[r+1][i],r==2?0xd0d3d5:0xa4a8ab);}
     const size_t shell_faces=m.size();
+    // Shoulder controls sit on the rear/top edge, behind the front shell.
+    // Keep them in a rear layer so painter sorting cannot expose their buried bases.
+    const size_t shoulder_first=m.size();
     for(int side:{-1,1}){
-        box(m,side*37,36,10,24,8,9,0x292724); // L1/R1 shoulders.
-        box(m,side*39,38,-1,25,8,8,0x1e1c1a); // L2/R2 shoulders.
+        box(m,side*37,38,2,24,8,8,0x292724); // L1/R1 shoulders.
+        box(m,side*39,40,-6,25,8,6,0x1e1c1a); // L2/R2 shoulders.
     }
+    for(size_t f=shoulder_first;f<m.size();++f)m[f].layer=-1;
     cylinder(m,-38,16,10,17,1.2,0x9fa3a6,20);
     // Four separate directional keys, with a recessed centre.
     for(int side:{-1,1}){
