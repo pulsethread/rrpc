@@ -1,14 +1,7 @@
 # Rage Racer - PC
 
-This folder contains the Windows source files and build inputs for both
-`RageRacer.exe` and `Generate Data.exe`. It is independent of `Port`, `Source`,
-`Reversing` and the old attempt. No original disc image, personal saves,
-`data.dat`, compiled game executable or development cache is included.
-The included open-source OpenBIOS firmware is a required build input. No
-original disc bytes, regional conversion patches or complete images are included.
-Generated game C is included so building does not require a disc, Ghidra or
-running the recompiler again. Framework code is the pinned, locally adapted
-psxrecomp runtime; dependency notices are retained with their sources.
+THIS IS A VERY EXPERIMENTAL PORT - THERE WILL BE BUGS, NOT EVERTYHING CURRENTLY WORKS
+If you're looking for a more robust port, check out Kris's port over at : https://github.com/khasinski/rage-racer-pc/
 
 ## Build
 
