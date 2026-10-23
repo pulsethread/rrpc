@@ -101,6 +101,16 @@ inline constexpr uint32_t rage_region_addresses[][3]={
 {0x8009e688u,0x8009de18u,0x8009e390u},
 {0x8009e6a8u,0x8009de38u,0x8009e3b0u},
 {0x8019c7d0u,0x8019bf60u,0x8019c4d8u},
+{0x8005131cu,0x80050c64u,0x80051030u}, // DrawMenuCarView
+{0x800551bcu,0x80054b04u,0x80054ed0u}, // DrawCarSelectScreen
+{0x8004fce8u,0x8004f630u,0x8004f9fcu}, // DrawCarNamePlate
+{0x800496f0u,0x80049080u,0x80049404u}, // DrawCarSpecGraph
+{0x8004cf30u,0x8004c8c0u,0x8004cc44u}, // DrawMenuLightBurst
+{0x8004f3ecu,0x8004ed34u,0x8004f100u}, // DrawOwnedCarCounter
+{0x80049418u,0x80048da8u,0x8004912cu}, // DrawBrowseArrows
+{0x80052158u,0x80051aa0u,0x80051e6cu}, // DrawCarEngineSpec
+{0x8009e694u,0x8009de24u,0x8009e39cu}, // g_AnimTimer
+{0x801e436au,0x801e3afau,0x801e4072u}, // g_PadHeld
 };
 inline uint32_t rage_region_address(uint32_t address) {
     for(const auto& row:rage_region_addresses)if(row[0]==address)return row[rage_active_region];

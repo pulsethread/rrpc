@@ -871,3 +871,39 @@ retained-terrain-final-verification.json. Previous executables backed up under
 Port/data/release-backups/20261023-retained-terrain. Installed main/Updated
 executables match; game archive, user cards/settings unchanged; bundle verify
 exit0. No GitHub publication was requested in this turn.
+
+### Multiplayer menu foundation — 23 October 2026
+
+Installed main and Updated executable SHA256
+6882bcdf52f4e4d5a908091086d9820440cf9a04c2069d3b3394437fbeb903f8.
+The title menu now has Multiplayer immediately below Free run. Both extra-GP
+locked and unlocked layouts fit within 240 lines. Its native 112x16 indexed
+label uses the original title-menu glyph pixels and grey/red palettes, without
+a system font or resized glyphs. The retail menu provides pre-rendered words,
+not a complete font file: missing U and Y were reconstructed from O bowl/stems
+and X arms/I stem respectively. The added atlas row ends at v239, preserving
+the v240..255 copyright strip, original rows, logo, Press Start and TM.
+
+Multiplayer enters the shared solo/showroom layout directly. Three blank row
+plates keep their original animation/highlight. Car names, count, specifications,
+graph, browsing arrows, gear and captions are suppressed only in this mode.
+Confirm is inert; left/right cannot change the player's car. Cancel returns
+to the title through the existing solo-screen exit path. No network/session
+logic or multiplayer racing is claimed by this UI foundation.
+
+Two independently posed, shaded 3D original PlayStation digital controllers replace the
+car. The light-grey compiled procedural mesh includes compact bevelled shells/grips, directional
+keys, coloured face symbols, shoulders, Select/Start buttons
+and cables. Geometry is transformed/projected and submitted as opaque triangles
+through the live scratch ordering-table pointer, with one submission per menu
+animation tick. No flat controller image, original game-data edit or downloaded
+model is required. A stable shell/control/icon layer order avoids concave-shell
+mean-depth triangles covering raised controls in the original painter renderer.
+
+All 18 native contracts passed, including menu navigation/placeholder guards,
+atlas bounds and model topology/projection/packet ownership for PAL, JP and US.
+Live navigation verified the new entry, blank buttons, unchanged car selection
+and Cancel-to-title. The 162-check driver probe passed, with zero errors in
+300 retained GL events. Screenshots and glyph provenance are under
+Port/data/multiplayer-development; installation.json records backups and hashes.
+User archive/cards/settings remain unchanged; installed bundle verify exited 0.

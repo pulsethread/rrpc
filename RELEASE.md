@@ -1,3 +1,20 @@
+# Release 0.3.27
+
+Adds the Multiplayer menu foundation and original PlayStation digital-controller models.
+
+- Add Multiplayer below Free run using lettering assembled from the original menu character artwork.
+- Open a showroom-style page with three blank buttons and two animated 3D controllers in place of the car.
+- Model the original digital pads in light grey, with compact grips, directional keys, coloured face symbols, shoulder buttons, Select/Start and cables. Analogue sticks and the mode light are removed.
+- Keep placeholder buttons inert and return to the title with Cancel. Network play is not implemented in this release.
+
+### Windows download
+
+Extract `RageRacer-PC-v0.3.27.zip` into your game folder. Replace the supplied program files and retain your existing `data.dat`, saves, settings, music and mods. The data generator is unchanged. No original game data is included.
+
+### Validation
+
+All 18 native tests passed. Live menu checks confirmed navigation, blank buttons, unchanged car selection and Cancel-to-title. The 162-check GPU probe passed with no failures. Existing game data, memory cards and graphics preferences were verified unchanged.
+
 # Release 0.3.26
 
 Reuses track geometry on the GPU to reduce repeated rendering work, and preserves more Free run scenery.

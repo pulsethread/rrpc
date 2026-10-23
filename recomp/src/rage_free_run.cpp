@@ -3,16 +3,19 @@
 #include "gpu.h"
 #include "rage_free_run_art.h"
 #include "rage_free_world.h"
+#include "rage_multiplayer.h"
+#include "rage_multiplayer_art.h"
 #include <algorithm>
 
 namespace {
 int selection=0;
 bool free_run=false;
+bool multiplayer=false;
 bool exit_vehicle_select=false;
 uint32_t addr(uint32_t p){return rage_region_address(p);}
 uint32_t word(CPUState* c,uint32_t p){return c->read_word(addr(p));}
 void store(CPUState* c,uint32_t p,uint32_t v){c->write_word(addr(p),v);}
-int original_selection(int s){return s==3?2:s>3?s-1:s;}
+int original_selection(int s){return (s==3 || s==4)?2:s>4?s-2:s;}
 bool ram(uint32_t p,unsigned bytes){p&=0x1fffffffu;return p>=0x10000 && p<=0x200000-bytes;}
 uint32_t xy(int x,int y){return uint16_t(x)|(uint32_t(uint16_t(y))<<16);}
 void prepare_labels(){
@@ -31,6 +34,13 @@ void prepare_labels(){
         gpu_write_gp0(0xa0000000);gpu_write_gp0(604|(uint32_t(top)<<16));gpu_write_gp0(28|(16u<<16));
         for(size_t i=0;i<label.size();i+=2)gpu_write_gp0(label[i]|(uint32_t(label[i+1])<<16));
     }
+    // One native indexed row serves both original grey/red CLUTs. The
+    // copyright occupies v240..255; this row ends immediately above it.
+    bool matches=true;
+    for(int y=0;y<16 && matches;++y)for(int x=0;x<28;++x)
+        if(vram[(480+y)*1024+604+x]!=rage_multiplayer_label[y*28+x]){matches=false;break;}
+    if(!matches){gpu_write_gp0(0xa0000000);gpu_write_gp0(604|(480u<<16));gpu_write_gp0(28|(16u<<16));
+        for(size_t i=0;i<rage_multiplayer_label.size();i+=2)gpu_write_gp0(rage_multiplayer_label[i]|(uint32_t(rage_multiplayer_label[i+1])<<16));}
 }
 // The game's POLY_FT4 layout. Publish through the same ordering table and
 // scratch cursor as the original rows, retaining fades and presentation paths.
@@ -45,23 +55,25 @@ void rect(CPUState* c,uint32_t& cursor,uint32_t ot,int x,int y,int w,int h,
 }
 void draw_menu(CPUState* c){
     const int state=word(c,0x8009f098),slide=word(c,0x801e6f1c);
-    if(state==1 && slide<=1){selection=0;free_run=false;exit_vehicle_select=false;}
+    if(state==1 && slide<=1){selection=0;free_run=false;multiplayer=false;exit_vehicle_select=false;}
     const bool extra=word(c,0x8019cac0)!=0;
     if(!extra && selection==1)selection=0;
     uint32_t cursor=c->read_word(0x1f800000),ot=word(c,0x8019c900)+0xcc;
-    if(!ram(cursor,6*8*40) || !ram(ot,4))return;
+    if(!ram(cursor,7*8*40) || !ram(ot,4))return;
     prepare_labels();
     int row=0;
-    for(int i=0;i<6;++i){
+    for(int i=0;i<7;++i){
         if(i==1 && !extra)continue;
         const int h=state==1?std::clamp(slide-row*8,0,16):16;
-        const int y=100+24*row++;
+        const int y=100+(extra?20:24)*row++;
         const bool highlight=i==selection && state!=1 && !(word(c,0x801e429c)&2);
         const int clut=highlight?0x7e86:0x7e85;
-        if(i!=3){
+        if(i!=3 && i!=4){
             rect(c,cursor,ot,104,y,112,h,0,160+16*original_selection(i),112,16,clut,0x39);
-        }else{
+        }else if(i==3){
             rect(c,cursor,ot,104,y,112,h,112,highlight?208:192,112,16,clut,0x39);
+        }else{
+            rect(c,cursor,ot,104,y,112,h,112,224,112,16,clut,0x39);
         }
     }
     c->write_word(0x1f800000,cursor);
@@ -78,7 +90,7 @@ extern "C" int rage_free_run_dispatch(CPUState* c,uint32_t target){
         const bool extra=word(c,0x8019cac0)!=0;
         const int direction=(buttons&0x1000)?-1:(buttons&0x4000)?1:0;
         if(direction){
-            do{selection=(selection+direction+6)%6;}while(selection==1 && !extra);
+            do{selection=(selection+direction+7)%7;}while(selection==1 && !extra);
             // Let the original routine handle navigation sound, confirmation,
             // loading, and mode selection. Both solo entries use its TA path.
             const int wanted=original_selection(selection);
@@ -86,12 +98,12 @@ extern "C" int rage_free_run_dispatch(CPUState* c,uint32_t target){
             if(!extra && previous==1)previous=(previous-direction+5)%5;
             store(c,0x801e4184,previous);
         }else store(c,0x801e4184,original_selection(selection));
-        if(buttons&0x860)free_run=selection==3;
+        if(buttons&0x860){free_run=selection==3;multiplayer=selection==4;}
         return 0;
     }
     case 0x1b2d4:draw_menu(c);break;
     case 0x5aca0:
-        if(!free_run || word(c,0x8019c9f8)!=1)return 0;
+        if((!free_run && !multiplayer) || word(c,0x8019c9f8)!=1)return 0;
         if(exit_vehicle_select){
             const uint32_t progress=word(c,0x801e4fac);
             const uint32_t course=word(c,0x801e428c);
@@ -118,9 +130,47 @@ extern "C" int rage_free_run_dispatch(CPUState* c,uint32_t target){
         store(c,0x8009b30c,1); // Shared menu chrome and button hints open with the vehicle screen.
         return 0;
     case 0x5568c:
+        if(multiplayer){
+            rage_multiplayer_draw(c);
+            const uint16_t buttons=c->read_half(addr(0x801e436e));
+            if(buttons&0x90){exit_vehicle_select=true;store(c,0x8019c9f8,1);break;}
+            // Placeholder buttons may highlight, but never start a race,
+            // customise a car or browse/change the player's vehicle.
+            c->write_half(addr(0x801e436e),buttons&uint16_t(~0xa860u));
+            c->write_half(addr(0x801e436a),c->read_half(addr(0x801e436a))&uint16_t(~0xa000u));
+            return 0;
+        }
         if(free_run && word(c,0x8009b308)==5)exit_vehicle_select=true;
         return 0;
+    case 0x5131c:
+        if(!multiplayer)return 0;
+        rage_multiplayer_draw(c);
+        break;
+    case 0x551bc:
+        if(!multiplayer)return 0;
+        // Preserve the stock screen fade state while removing gear labels.
+        if(ram(c->gpr[4],4)){
+            const int step=int32_t(c->gpr[5]);
+            const int value=step?int(std::clamp(int64_t(int32_t(c->read_word(c->gpr[4])))+step,int64_t(0),int64_t(508))):0;
+            c->write_word(c->gpr[4],value);c->gpr[2]=value;
+        }
+        break;
+    case 0x4fce8: // Grade, make and car name.
+    case 0x496f0: // Performance graph.
+    case 0x4cf30: // Showroom light burst.
+    case 0x4f3ec: // Number of cars.
+    case 0x49418: // Previous/next car arrows.
+    case 0x52158: // Engine specification.
+        if(!multiplayer)return 0;
+        break;
     case 0x48078:{
+        if(multiplayer && word(c,0x801e42e4)==8){
+            const uint32_t shape=c->gpr[5];
+            // Rounded row plates are part of the shared screen chrome.
+            // Captions and the CAR/S heading are separate scripted sprites.
+            if(ram(shape,8) && c->read_half(shape)>80 && c->read_half(shape+2)>=20)return 0;
+            break;
+        }
         if(!free_run || word(c,0x801e42e4)!=8 || word(c,0x8019c9f8)!=4)return 0;
         const uint32_t shape=c->gpr[5];
         if(!ram(shape,8))return 0;
@@ -173,3 +223,4 @@ extern "C" int rage_free_run_dispatch(CPUState* c,uint32_t target){
     c->pc=c->gpr[31];return 1;
 }
 extern "C" int rage_free_run_active(){return free_run;}
+extern "C" int rage_multiplayer_active(){return multiplayer;}

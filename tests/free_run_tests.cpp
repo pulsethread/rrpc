@@ -1,10 +1,14 @@
 #include "rage_free_run.h"
 #include "rage_region.h"
 #include "rage_free_run_art.h"
+#include "rage_multiplayer_art.h"
+#include "rage_multiplayer.h"
 #include <cassert>
 #include <cstring>
 #include <vector>
 int rage_free_world_dispatch(CPUState*,uint32_t){return 0;}
+int controller_draws=0;
+extern "C" void rage_multiplayer_draw(CPUState*){++controller_draws;}
 namespace {
 std::vector<uint16_t> vram(1024*512,0x5a5a);
 int upload_stage=0,upload_x=0,upload_y=0,upload_w=0,upload_h=0,upload_pixel=0;
@@ -16,7 +20,7 @@ extern "C" void gpu_write_gp0(uint32_t value){
     if(upload_stage==2){upload_w=value&0xffff;upload_h=value>>16;upload_pixel=0;upload_stage=3;return;}
     for(int i=0;i<2;++i){
         const int x=upload_x+upload_pixel%upload_w,y=upload_y+upload_pixel/upload_w;
-        assert(x>=604 && x<632 && y>=448 && y<480);
+        assert(x>=604 && x<632 && y>=448 && y<496);
         vram.at(y*1024+x)=uint16_t(value>>(16*i));++upload_pixel;
     }
     if(upload_pixel==upload_w*upload_h)upload_stage=0;
@@ -51,9 +55,10 @@ void opening(bool extra){
     // logo, TM, Press Start, menu rows, copyright strip and palettes intact.
     assert(upload_stage==0);
     for(int y=0;y<512;++y)for(int x=0;x<1024;++x){
-        const bool custom=x>=604 && x<632 && y>=448 && y<480;
-        assert(vram[y*1024+x]==(custom?
-            rage_free_run_labels[(y-448)/16][((y-448)%16)*28+x-604]:0x5a5a));
+        const bool free=x>=604 && x<632 && y>=448 && y<480;
+        const bool multi=x>=604 && x<632 && y>=480 && y<496;
+        assert(vram[y*1024+x]==(free?rage_free_run_labels[(y-448)/16][((y-448)%16)*28+x-604]:
+            multi?rage_multiplayer_label[(y-480)*28+x-604]:0x5a5a));
     }
     set(0x8009f098,2);
 }
@@ -65,7 +70,7 @@ int main(){
         rage_active_region=region;
         for(bool extra:{false,true}){
             opening(extra);
-            const std::vector<int> order=extra?std::vector<int>{1,2,2,3,4,0}:std::vector<int>{2,2,3,4,0};
+            const std::vector<int> order=extra?std::vector<int>{1,2,2,2,3,4,0}:std::vector<int>{2,2,2,3,4,0};
             for(int s:order){press(0x4000,extra);assert(get(0x801e4184)==s);}
             press(0x1000,extra);assert(get(0x801e4184)==4);
         }
@@ -103,5 +108,23 @@ int main(){
         assert(hook(0x80021d68)==0 && hook(0x80022068)==0 && hook(0x8001c974)==0);
         set(0x8019c9f8,1);assert(hook(0x8005aca0)==0 && get(0x8019c9f8)==1);
         assert(hook(0x80018000)==0);
+        opening(false);press(0x4000);press(0x4000);press(0x4000);press(0x40);
+        assert(rage_multiplayer_active() && !rage_free_run_active());
+        assert(get(0x801e4184)==2);
+        set(0x8019c9f8,1);assert(hook(0x8005aca0)==0 && get(0x8019c9f8)==3);
+        set(0x8019c9f8,4);set(0x801e42e4,8);
+        wh(rage_region_address(0x801e436e),0xa860);wh(rage_region_address(0x801e436a),0xa000);
+        assert(hook(0x8005568c)==0);
+        assert(rh(rage_region_address(0x801e436e))==0 && rh(rage_region_address(0x801e436a))==0);
+        const int draws=controller_draws;assert(hook(0x8005131c)==1 && controller_draws==draws+1);
+        for(uint32_t p:{0x8004fce8u,0x800496f0u,0x8004cf30u,0x8004f3ecu,0x80049418u,0x80052158u,0x80048078u})assert(hook(p)==1);
+        cpu.gpr[4]=0x80120000;ww(cpu.gpr[4],500);cpu.gpr[5]=20;
+        assert(hook(0x800551bc)==1 && rw(cpu.gpr[4])==508 && cpu.gpr[2]==508);
+        cpu.gpr[5]=0;assert(hook(0x800551bc)==1 && rw(cpu.gpr[4])==0);
+        wh(rage_region_address(0x801e436e),0x10);
+        assert(hook(0x8005568c)==1 && get(0x8019c9f8)==1);
+        assert(hook(0x8005aca0)==1 && get(0x801e42e4)==2);
+        opening(false);assert(!rage_multiplayer_active());
+        for(uint32_t p:{0x8004fce8u,0x800496f0u,0x8004cf30u,0x8004f3ecu,0x80049418u,0x80052158u,0x8005131cu})assert(hook(p)==0);
     }
 }
