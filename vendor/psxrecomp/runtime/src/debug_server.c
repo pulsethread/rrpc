@@ -10763,6 +10763,10 @@ static void handle_frame_gen(int id, const char *json)
     uint64_t native_uploads=0,native_hits=0,native_draws=0,native_camera=0;gl_renderer_native_scene_stats(&native_uploads,&native_hits,&native_draws,&native_camera);
     extern void gl_renderer_native_efficiency(uint64_t out[5]);
     extern void gl_renderer_native_queue_efficiency(uint64_t out[5]);
+    extern void gl_renderer_retained_terrain_stats(uint64_t out[5]);
+    {uint64_t t[5];gl_renderer_retained_terrain_stats(t);const size_t n=strlen(buf);
+        snprintf(buf+n,sizeof buf-n,",\"retained_terrain_hits\":%llu,\"retained_terrain_builds\":%llu,\"retained_terrain_vertices_reused\":%llu,\"terrain_gpu_copy_bytes\":%llu,\"terrain_merged_groups\":%llu",
+            (unsigned long long)t[0],(unsigned long long)t[1],(unsigned long long)t[2],(unsigned long long)t[3],(unsigned long long)t[4]);}
     extern void gl_renderer_car_light_stats(uint64_t out[3]);
     extern uint64_t gl_renderer_player_lamp_fallbacks(void);
     extern void gl_renderer_car_lights_live(uint64_t out[3]);

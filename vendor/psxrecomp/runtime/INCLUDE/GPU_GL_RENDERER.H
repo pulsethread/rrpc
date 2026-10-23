@@ -566,6 +566,11 @@ typedef struct PSXTerrainTriangle {
 void gl_renderer_draw_terrain_batch(const RageSceneVertex* pose,
     const PSXTerrainTriangle* triangles, unsigned count, unsigned source,
     unsigned unlit, uint32_t restore_window);
+/* identity is never reused for a different immutable source range. The command
+ * still owns a complete copy for fallback, interpolation and resource recovery. */
+void gl_renderer_draw_retained_terrain(const RageSceneVertex* pose,
+    const PSXTerrainTriangle* triangles, unsigned count, unsigned source,
+    unsigned unlit, uint32_t restore_window, uint64_t identity);
 #endif
 /* Cumulative textured-batch diagnostics: total, then flushes caused by
  * isolation, blend-mode, mask, filter, backdrop-gate, texture-window, capacity. */

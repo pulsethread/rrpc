@@ -173,6 +173,9 @@ static bool blocks_route(const Quad& face,const std::vector<RageTrackRoutePoint>
  // Preserve road decks, sloping road shoulders and horizontal scenery.
  if(std::abs(ny)>std::hypot(nx,nz)*.2)return false;
  double low=face[0][1],high=low;for(const auto& p:face){low=std::min(low,p[1]);high=std::max(high,p[1]);}
+ // A junction closure is a short panel at road level. Tall supports and
+ // overhead sign/bridge faces are scenery even when they cross a lane.
+ if(high-low>512)return false;
 
  for(size_t i=0;i<route.size();++i){const auto& a=route[i];const auto& b=route[(i+1)%route.size()];
   const double dx=b.x-a.x,dz=b.z-a.z,nn=dx*dx+dz*dz;if(nn<1 || a.left<=0 || b.left<=0 || (!merging_world && nn>8192.*8192))continue;
@@ -187,7 +190,7 @@ static bool blocks_route(const Quad& face,const std::vector<RageTrackRoutePoint>
     // Only walls facing across the lane can close a junction. Side rails stay.
     if(std::abs(nx*dx+nz*dz)<.75*std::hypot(nx,nz)*std::sqrt(nn))continue;
     double y=a.y+(b.y-a.y)*along;
-    if(width>32 && std::hypot(x-rx,z-rz)<width && high>=y-768 && low<=y+64 && high-low>=64)return true;
+    if(width>32 && std::hypot(x-rx,z-rz)<width && high>=y-128 && low<=y+64 && high-low>=64)return true;
    }
   }
  }
@@ -292,16 +295,20 @@ void assign_world_banks(RageTrackCourse& mesh,const Bytes& pack,unsigned source,
  const unsigned start=u32(pack,offsets[9])%count;const double origin=prefix[start+1],length=prefix.back();
  const int lo=int32_t(u32(pack,offsets[0])),hi=int32_t(u32(pack,offsets[0]+4));
  for(auto& f:mesh.faces){double x=0,y=0,z=0;for(auto v:f.vertex){x+=mesh.vertices[v][0]/16.;y+=mesh.vertices[v][1]/16.;z+=mesh.vertices[v][2]/16.;}
-  double best=1e30,progress=0;unsigned nearest=0;
+  double best=1e30,progress=0;unsigned nearest=0;bool near_lower=false;
   for(unsigned i=0;i<count;++i){const auto& a=points[i];double cx=0,cz=0;
    if(a.arc&3){const int64_t p=path+4+24*count+12*int64_t(int16_t(a.arc)>>4);if(p>=0 && p+8<=int64_t(offsets[5])){cx=int32_t(u32(pack,size_t(p)));cz=int32_t(u32(pack,size_t(p)+4));}}
    const auto h=rage_road_contact(a,points[(i+1)%count],cx,cz,x,z);
+   // Keep the signs, bridge faces and supports around the visible lower
+   // stretch together, even when their centres are closer to an upper road.
+   if(band && (i<=(*band)[1] || i>=(*band)[2]) && h.end_distance<128 &&
+      h.distance<std::max(a.left,a.right)+128 && std::abs(h.height-y)<768)near_lower=true;
    const double score=h.distance+h.end_distance*8+std::abs(h.height-y)*.1;
    if(score<best){best=score;nearest=i;progress=std::fmod(origin-prefix[i]-std::clamp(h.along,0.,double(a.length))+length,length);}
   }
   const int section=int(progress)>>8;const unsigned bank=section>=lo && section<hi?1:0;
   f.page=uint16_t(f.page&0x1ff)|uint16_t((source+bank)<<9);
-  f.free_run_later=band && nearest>(*band)[1] && nearest<(*band)[2];
+  f.free_run_later=band && nearest>(*band)[1] && nearest<(*band)[2] && !near_lower;
  }
 }
 }

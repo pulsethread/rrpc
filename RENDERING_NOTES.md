@@ -832,3 +832,42 @@ all four car collision corners lie within the union of adjoining road corridors
 at the same height. Road edges without a neighbouring road, and crossings at
 a different height, retain the original collision response. Height, banking,
 surface response and the remaining boundary checks still use the retail routine.
+
+
+### Free run signs and bridge preservation
+
+Junction-panel removal now requires a short vertical obstruction reaching road
+level. Elevated sign boards, bridge beams and tall supports are retained.
+Upper-section visibility classification also preserves scenery within the lower
+road corridor, so an overhead structure does not disappear merely because its
+centre is nearer an upper road. On the class-1 four-course fixture this retains
+128 additional faces (190 additional triangles) versus the previous merge.
+Regression checks cover elevated panels, tall supports, sampled authored
+structure surfaces, and the existing open-junction/outside-edge behaviour.
+
+### Retained terrain ranges — 23 October 2026
+
+Installed executable SHA256 f2edfb1c040bdf48b1a2e2ae62bbc2ba612a99473520dc0a68330ad3055935d5.
+The updated reference renderer informed immutable terrain range identities,
+resident GPU sources and adjacent compatible draw coalescing. Visible ranges
+are gathered on the GPU; normal hits avoid per-triangle CPU expansion and
+full-geometry hashing/comparison. Commands retain complete fallback payloads.
+Camera, mirror, fade and light state remain live. Material tile reuse, dirty
+materials, settings changes and native allocation serials guard cache validity.
+Shadow/player tags are cached with immutable meshes. RAGE_RETAINED_TERRAIN=0
+retains the prior path for comparisons. Source retention remains bounded;
+extra expanded gather sources and the GPU gather stream add bounded GPU memory.
+This is not zero-copy rendering and does not change clipping or draw distance.
+
+Two matched full-lap pairs showed 35.56% / 62.61% higher real-plus-generated
+presentation throughput and 19.20% / 7.64% less process CPU. The first pair
+included route screenshots; the final exact-executable pair did not. These
+are sequential local observations with substantial variation, not guaranteed
+FPS gains. All 17 native contracts passed; driver checks passed on race,
+high-quality scale8/filter3/effects, replay and five Free run locations, with
+zero retained GL errors. Whole game images are not claimed byte-identical.
+Details: Port/data/REFERENCE_PERFORMANCE_REVIEW_2026-10-23.md and
+retained-terrain-final-verification.json. Previous executables backed up under
+Port/data/release-backups/20261023-retained-terrain. Installed main/Updated
+executables match; game archive, user cards/settings unchanged; bundle verify
+exit0. No GitHub publication was requested in this turn.

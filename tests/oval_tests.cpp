@@ -11,6 +11,11 @@ int main(int argc,char** argv){try{
  require(blocks_route({Point{-120,-80,500},Point{120,-80,500},Point{-120,0,500},Point{120,0,500}},lane));
  require(!blocks_route({Point{-120,-2000,500},Point{120,-2000,500},Point{-120,-1900,500},Point{120,-1900,500}},lane));
  require(!blocks_route({Point{300,-80,500},Point{600,-80,500},Point{300,0,500},Point{600,0,500}},lane));
+ // Elevated signs and bridge side beams must not be mistaken for closures.
+ require(!blocks_route({Point{-120,-600,500},Point{120,-600,500},Point{-120,-400,500},Point{120,-400,500}},lane));
+ require(!blocks_route({Point{-120,-400,500},Point{120,-400,500},Point{-120,-200,500},Point{120,-200,500}},lane));
+ // Bridge/sign supports can reach the ground but are taller than a barrier.
+ require(!blocks_route({Point{-60,-2000,500},Point{60,-2000,500},Point{-60,0,500},Point{60,0,500}},lane));
  require(argc==2);std::filesystem::path root=argv[1];
  // Subtract overlapping clips sequentially: union removal must not count
  // overlaps twice, and new vertices must keep interpolated texture coordinates.

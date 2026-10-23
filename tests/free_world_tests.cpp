@@ -62,6 +62,35 @@ int main(int argc,char** argv){
     RageTrackCourse world;assert(rage_free_world_build(active,world,0,0));
     assert(world.faces.size()>active.faces.size());assert(world.triangles.size()>active.triangles.size());assert(rage_free_world_ready());
     std::cout<<"Unified geometry: "<<world.faces.size()<<" faces, "<<world.triangles.size()<<" triangles\n";
+    // Reconstructed terrain must retain the authored surfaces of tall lower-
+    // road structures. Test points on their actual triangles, not just counts.
+    // Elevated boards beside the lower road must stay visible even when
+    // their height puts them closer to an upper section of the same course.
+    for(unsigned r=0;r<3;++r){const auto offsets=chunks(free_packs[r]);const size_t path=offsets[4];
+        const unsigned n=u32(free_packs[r],path);const auto& band=rage_free_tunnel_bands[r];RageTrackCourse boards;
+        for(unsigned i=0;i<n;++i){if(i>band[1] && i<band[2])continue;const size_t p=path+4+24*i;
+            const float x=float(int32_t(u32(free_packs[r],p)))*4,z=float(int32_t(u32(free_packs[r],p+4)))*4,y=float(int16_t(u16(free_packs[r],p+8)))*4-2048;
+            RageTrackFace face{};for(unsigned k=0;k<4;++k){face.vertex[k]=unsigned(boards.vertices.size());boards.vertices.push_back({x+(k&1?32.f:-32.f),y+(k&2?128.f:-128.f),z});}boards.faces.push_back(face);}
+        assign_world_banks(boards,free_packs[r],2+2*r,&band);
+        for(const auto& face:boards.faces)assert(!face.free_run_later);
+    }
+    unsigned structureSamples=0;
+    for(unsigned r=0;r<3 && structureSamples<64;++r)for(const auto& f:free_meshes[r]->faces){
+        if(structureSamples>=64)break;if(f.free_run_later)continue;
+        double low=1e30,high=-1e30;for(auto v:f.vertex){low=std::min(low,double(free_meshes[r]->vertices[v][1]));high=std::max(high,double(free_meshes[r]->vertices[v][1]));}
+        if(high-low<=512)continue;
+        for(const auto& c:corners){Key source;Point mid{};
+            for(int k=0;k<3;++k){source[k]=point(*free_meshes[r],f.vertex[c[k]]);for(int axis=0;axis<3;++axis)mid[axis]+=source[k][axis]/3;}
+            Surface expected;if(!surface(source,expected))continue;bool covered=false;
+            for(const auto& tri:world.triangles){Key points;for(int k=0;k<3;++k)points[k]=point(world,tri.vertex[k]);Surface candidate;
+                if(!surface(points,candidate))continue;double distance=-candidate.d;for(int axis=0;axis<3;++axis)distance+=candidate.n[axis]*mid[axis];if(std::abs(distance)>.5)continue;
+                const double sign=cross(points[0],points[1],points[2],candidate.axis)>0?1:-1;
+                if(cross(points[0],points[1],mid,candidate.axis)*sign>=-.5 && cross(points[1],points[2],mid,candidate.axis)*sign>=-.5 && cross(points[2],points[0],mid,candidate.axis)*sign>=-.5){covered=true;break;}
+            }
+            assert(covered);++structureSamples;
+        }
+    }
+    assert(structureSamples>=32);std::cout<<"Preserved "<<structureSamples<<" authored structure surface samples\n";
     CPUState cpu{};cpu.read_word=rw;cpu.read_half=rh;cpu.read_byte=rb;cpu.write_word=ww;cpu.write_half=wh;cpu.write_byte=wb;
     const uint32_t car=0x8009e6d4;cpu.gpr[4]=car;cpu.gpr[31]=0x80012344;
     unsigned laterFaces=0,lowerFaces=0;

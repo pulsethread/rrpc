@@ -203,6 +203,7 @@ typedef void   (APIENTRY *PFN_glDeleteBuffers)(GLsizei, const GLuint *);
 typedef void   (APIENTRY *PFN_glDeleteVertexArrays)(GLsizei, const GLuint *);
 typedef void   (APIENTRY *PFN_glBindBuffer)(GLenum, GLuint);
 typedef void   (APIENTRY *PFN_glBufferData)(GLenum, ptrdiff_t, const void *, GLenum);
+typedef void   (APIENTRY *PFN_glCopyBufferSubData)(GLenum, GLenum, ptrdiff_t, ptrdiff_t, ptrdiff_t);
 typedef void   (APIENTRY *PFN_glVertexAttribPointer)(GLuint, GLint, GLenum, GLboolean, GLsizei, const void *);
 typedef void   (APIENTRY *PFN_glEnableVertexAttribArray)(GLuint);
 typedef void   (APIENTRY *PFN_glBindFragDataLocationIndexed)(GLuint, GLuint, GLuint, const char *);
@@ -275,6 +276,7 @@ static PFN_glDeleteBuffers     p_glDeleteBuffers;
 static PFN_glDeleteVertexArrays p_glDeleteVertexArrays;
 static PFN_glBindBuffer        p_glBindBuffer;
 static PFN_glBufferData        p_glBufferData;
+static PFN_glCopyBufferSubData p_glCopyBufferSubData;
 static PFN_glVertexAttribPointer p_glVertexAttribPointer;
 static PFN_glEnableVertexAttribArray p_glEnableVertexAttribArray;
 static PFN_glBindFragDataLocationIndexed p_glBindFragDataLocationIndexed;
@@ -356,6 +358,7 @@ static int load_modern_gl(void) {
     LOAD(p_glActiveTexture, "glActiveTexture");  LOAD(p_glGenBuffers, "glGenBuffers");
     LOAD(p_glDeleteBuffers, "glDeleteBuffers"); LOAD(p_glDeleteVertexArrays, "glDeleteVertexArrays");
     LOAD(p_glBindBuffer, "glBindBuffer");        LOAD(p_glBufferData, "glBufferData");
+    LOAD(p_glCopyBufferSubData,"glCopyBufferSubData");
     LOAD(p_glVertexAttribPointer, "glVertexAttribPointer");
     LOAD(p_glEnableVertexAttribArray, "glEnableVertexAttribArray");
     LOAD(p_glBindFragDataLocationIndexed, "glBindFragDataLocationIndexed");
@@ -11720,6 +11723,8 @@ static int fg_raw_add(const FgRaw *r) {
 typedef struct RageTerrainBatchHeader {
     RageSceneVertex pose;
     uint32_t count, source, unlit, restore_window;
+    uint64_t identity;
+    uint32_t first,reserved;
 } RageTerrainBatchHeader;
 static void rage_terrain_replay(const RageTerrainBatchHeader*,const PSXTerrainTriangle*,uint16_t,int);
 static int rage_compact_terrain(void) {
@@ -14280,8 +14285,10 @@ static void gl_rth_exec(void *user, const RtCmd *c, const void *payload) {
 /* Expand only on the consumer. Existing frame-generation capture sees the
  * exact same triangle/state records, so interpolation and ordering do not
  * need a second implementation of terrain materials or camera history. */
+#include "rage_retained_terrain.h"
 static void rage_terrain_replay(const RageTerrainBatchHeader* h,
     const PSXTerrainTriangle* triangles,uint16_t flags,int capture) {
+    if(!capture && rage_retained_terrain_draw(h,triangles))return;
     uint32_t window=h->restore_window;
     struct {PSXProjectedVertex vertices[3];int32_t args[6];} p;
     memset(&p,0,sizeof p);
@@ -14315,20 +14322,27 @@ static void rage_terrain_replay(const RageTerrainBatchHeader* h,
         if(capture)gl_rth_exec(NULL,&state,&w);else glb_set_texture_window(h->restore_window);
     }
 }
-void gl_renderer_draw_terrain_batch(const RageSceneVertex* pose,
+void gl_renderer_draw_retained_terrain(const RageSceneVertex* pose,
     const PSXTerrainTriangle* triangles,unsigned count,unsigned source,
-    unsigned unlit,uint32_t restore_window){
+    unsigned unlit,uint32_t restore_window,uint64_t identity){
+    unsigned first=0;
     while(count){
         const unsigned n=count>128?128:count;
         RageTerrainBatchHeader header;header.pose=*pose;header.count=n;
         header.source=source;header.unlit=unlit;header.restore_window=restore_window;
+        header.identity=identity;header.first=first;header.reserved=0;
         if(rth_record_mode()){
             uint8_t* out=(uint8_t*)rt_cmd_begin(RTH_TERRAIN_BATCH,rth_prim_flags(),sizeof header+n*sizeof(*triangles));
             if(out){memcpy(out,&header,sizeof header);memcpy(out+sizeof header,triangles,n*sizeof(*triangles));rt_cmd_commit();}
             else {gl_rth_acquire("terrain_batch_oversize");rage_terrain_replay(&header,triangles,rth_prim_flags(),0);}
         }else rage_terrain_replay(&header,triangles,rth_prim_flags(),0);
-        triangles+=n;count-=n;
+        triangles+=n;count-=n;first+=n;
     }
+}
+void gl_renderer_draw_terrain_batch(const RageSceneVertex* pose,
+    const PSXTerrainTriangle* triangles,unsigned count,unsigned source,
+    unsigned unlit,uint32_t restore_window){
+    gl_renderer_draw_retained_terrain(pose,triangles,count,source,unlit,restore_window,0);
 }
 #endif
 static void gl_rth_ctx(void *user, int current) {

@@ -25,6 +25,8 @@ static void rage_material_prepare_filter(int aniso){
 enum { RAGE_MATERIAL_BUCKETS=2048, RAGE_MATERIAL_WAYS=4 };
 static int s_material_failed=0,s_material_lookup[RAGE_MATERIAL_BUCKETS*RAGE_MATERIAL_WAYS];
 static uint64_t s_material_clock=0;
+/* Vertex material addresses survive pixel updates, but never tile reuse. */
+static uint64_t s_material_layout_generation=1;
 static _Atomic uint64_t s_material_decodes=0,s_material_triangles=0,s_material_invalidations=0;
 static GLint s_material_uPage=-1,s_material_uClut=-1,s_material_uOrigin=-1,s_material_uAccurate=-1,s_material_uWindow=-1;
 static const char *RAGE_MATERIAL_VS=
@@ -122,6 +124,7 @@ static int rage_material_acquire(int px,int py,int depth,int cx,int cy) {
         if(s_material_slots[slot].occupied)rage_native_scene_flush();
         // Queued draws must finish before an atlas tile is replaced.
         flush_flat_batch();flush_tex_batch();
+        if(s_material_slots[slot].occupied)++s_material_layout_generation;
         s_material_slots[slot]=(RageMaterialSlot){1,1,px+external*1024,py,depth,cx,cy,accurate,twin};
         s_material_slots[slot].key=key;
     }
@@ -164,6 +167,7 @@ static void rage_material_release(void) {
     s_material_colour=s_material_flags=s_material_fbo=s_material_prog=0;s_material_failed=0;
     memset(s_material_lookup,0,sizeof s_material_lookup);s_material_clock=0;
     memset(s_material_slots,0,sizeof s_material_slots);
+    ++s_material_layout_generation;
     s_material_capacity=256;s_material_hw_filter=0;s_material_applied_aniso=-1;
 }
 void gl_renderer_scene_material_stats(uint64_t* decoded,uint64_t* triangles,uint64_t* invalidated) {

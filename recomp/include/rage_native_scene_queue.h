@@ -10,13 +10,52 @@ typedef struct RageNativeGroup {
     RageNativeBuffer* mesh;
     float* palette;
     size_t palette_capacity;
-    int poses,count,semi,decal,background,caster,view_valid,player_pose;
+    int poses,count,semi,decal,background,caster,view_valid,player_pose,first,retained,streamed,stream_first;
     float inverse_view[12];
     RageNativeState state;
     RageCarLightReceipt lamps[RAGE_SCENE_PALETTE];
 } RageNativeGroup;
 static RageNativeGroup s_native_queue[1024];
 static int s_native_queued,s_native_draining;
+static GLuint s_terrain_stream_buffer,s_terrain_stream_vao;
+static _Atomic uint64_t s_terrain_stream_bytes,s_terrain_merged_groups;
+/* Coalesce only adjacent ranges with exactly the same live draw state. GPU
+ * copies gather resident geometry; no vertex expansion, hash or CPU upload is
+ * performed here. Orphaning the destination preserves prior submitted draws. */
+static int rage_terrain_groups_equal(const RageNativeGroup* a,const RageNativeGroup* b){
+    return a->streamed && b->streamed && a->poses==b->poses && a->semi==b->semi &&
+        a->decal==b->decal && a->background==b->background && a->view_valid==b->view_valid &&
+        !memcmp(&a->state,&b->state,sizeof a->state) &&
+        !memcmp(a->palette,b->palette,(size_t)a->poses*80) &&
+        !memcmp(a->inverse_view,b->inverse_view,sizeof a->inverse_view) &&
+        !memcmp(a->lamps,b->lamps,(size_t)a->poses*sizeof(*a->lamps));
+}
+static void rage_terrain_stream_prepare(void){
+    size_t count=0;
+    for(int i=0;i<s_native_queued;++i)if(s_native_queue[i].retained &&
+        (!s_native_queue[i].mesh->indices || s_native_queue[i].mesh->expanded))count+=s_native_queue[i].count;
+    if(!count || count>(32u<<20)/64 || !p_glCopyBufferSubData)return;
+    if(!s_terrain_stream_buffer){
+        p_glGenBuffers(1,&s_terrain_stream_buffer);p_glGenVertexArrays(1,&s_terrain_stream_vao);
+        p_glBindVertexArray(s_terrain_stream_vao);p_glBindBuffer(PSXGL_ARRAY_BUFFER,s_terrain_stream_buffer);
+        const int sizes[5]={3,2,3,4,4},offsets[5]={0,3,5,8,12};
+        for(int i=0;i<5;++i){p_glEnableVertexAttribArray(i);p_glVertexAttribPointer(i,sizes[i],GL_FLOAT,GL_FALSE,64,(void*)(size_t)(offsets[i]*4));}
+    }
+    p_glBindBuffer(0x8F37 /* COPY_WRITE_BUFFER */,s_terrain_stream_buffer);
+    p_glBufferData(0x8F37,(ptrdiff_t)(count*64),NULL,PSXGL_STREAM_DRAW);
+    if(glGetError()!=GL_NO_ERROR)return;
+    size_t first=0;
+    for(int i=0;i<s_native_queued;++i){RageNativeGroup* g=&s_native_queue[i];
+        if(!g->retained || (g->mesh->indices && !g->mesh->expanded))continue;
+        p_glBindBuffer(0x8F36 /* COPY_READ_BUFFER */,g->mesh->expanded?g->mesh->expanded:g->mesh->buffer);
+        p_glCopyBufferSubData(0x8F36,0x8F37,(ptrdiff_t)g->first*64,(ptrdiff_t)first*64,(ptrdiff_t)g->count*64);
+        g->streamed=1;g->stream_first=(int)first;first+=g->count;
+    }
+    if(glGetError()!=GL_NO_ERROR){
+        for(int i=0;i<s_native_queued;++i)s_native_queue[i].streamed=0;
+    }else atomic_fetch_add(&s_terrain_stream_bytes,count*64);
+    p_glBindBuffer(0x8F36,0);p_glBindBuffer(0x8F37,0);
+}
 static GLuint s_vehicle_shadow_texture,s_vehicle_shadow_fbo;
 static float s_vehicle_shadow_rows[12];
 static int s_vehicle_shadow_valid;
@@ -40,8 +79,8 @@ static void rage_native_group_bind(const RageNativeGroup* g){
     p_glUniform4fv(s_native_camera,g->poses,g->palette+16*g->poses);
     p_glUniform4fv(s_native_inverse_view,3,g->inverse_view);
     p_glUniform4fv(s_native_shadow_rows,3,s_vehicle_shadow_rows);
-    p_glBindVertexArray(g->mesh->vao);
-    p_glBindBuffer(0x8893,g->mesh->indices);s_native_indexed_draw=g->mesh->indices!=0;
+    p_glBindVertexArray(g->streamed?s_terrain_stream_vao:g->mesh->vao);
+    p_glBindBuffer(0x8893,g->streamed?0:g->mesh->indices);s_native_indexed_draw=!g->streamed && g->mesh->indices!=0;
 }
 static int rage_vehicle_shadow_init(void){
     if(s_vehicle_shadow_fbo)return 1;
@@ -114,7 +153,14 @@ static void rage_native_scene_flush(void){
         ++s_vehicle_shadow_maps;glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);glDepthMask(GL_FALSE);glDisable(GL_DEPTH_TEST);
         p_glUniform1i(s_native_shadow_pass,0);
     }
-    for(int i=0;i<s_native_queued;++i){RageNativeGroup* g=&s_native_queue[i];
+    rage_terrain_stream_prepare();
+    for(int i=0;i<s_native_queued;++i){RageNativeGroup combined=s_native_queue[i];
+        int end=i+1;
+        while(end<s_native_queued && rage_terrain_groups_equal(&s_native_queue[i],&s_native_queue[end])){
+            combined.count+=s_native_queue[end].count;++end;
+        }
+        atomic_fetch_add(&s_terrain_merged_groups,end-i-1);
+        RageNativeGroup* g=&combined;if(g->streamed)g->first=g->stream_first;
         rage_native_state_set(&g->state);rage_native_view_depth();
         rage_material_prepare_filter(s_tex_aniso);hr_begin(1);p_glUseProgram(s_native_program);
         rage_native_group_bind(g);
@@ -128,16 +174,16 @@ static void rage_native_scene_flush(void){
         p_glActiveTexture(PSXGL_TEXTURE0+3);glBindTexture(GL_TEXTURE_2D,s_material_colour);
         p_glActiveTexture(PSXGL_TEXTURE0+4);glBindTexture(GL_TEXTURE_2D,s_material_flags);
         p_glActiveTexture(PSXGL_TEXTURE0+5);glBindTexture(GL_TEXTURE_2D,s_vehicle_shadow_texture);p_glActiveTexture(PSXGL_TEXTURE0);
-        rage_native_passes(g->count,g->semi,g->decal,g->background);
+        rage_native_range_passes(g->first,g->count,g->semi,g->decal,g->background);
         if(g->view_valid && s_vehicle_shadow_valid)++s_vehicle_shadow_receivers;
         if(g_wide_cur && s_ws_ablate!=1){
             wide_target_begin(wide_dx(),s_native_xoff,s_native_xhalf);
             if(!view_enabled && s_area_x2-s_area_x1+1<320){int x=s_area_x1+wide_dx(),end=s_area_x2+1+wide_dx();
                 if(x<view_pad_left)x=view_pad_left;if(end>g_wide_w-view_pad_right)end=g_wide_w-view_pad_right;wide_band_scissor_x(x,end>x?end-x:0);}
-            if(s_ws_ablate!=2)rage_native_passes(g->count,g->semi,g->decal,g->background);
+            if(s_ws_ablate!=2)rage_native_range_passes(g->first,g->count,g->semi,g->decal,g->background);
             wide_target_end(s_native_xoff,s_native_xhalf);
         }
-        hr_end();--g->mesh->pins;
+        hr_end();for(int j=i;j<end;++j)--s_native_queue[j].mesh->pins;i=end-1;
     }
     for(int i=0;i<view_count;++i)if(views[i].valid)rage_lamps_draw(&s_native_queue[views[i].group],lamp_now);
     s_native_indexed_draw=0;s_native_queued=0;rage_native_state_set(&saved);s_native_draining=0;
@@ -160,6 +206,9 @@ static int rage_native_scene_queue(RageNativeBuffer* mesh,int count,int semi,int
 static void rage_vehicle_shadow_release(void){
     rage_native_scene_flush();if(s_vehicle_shadow_fbo)p_glDeleteFramebuffers(1,&s_vehicle_shadow_fbo);
     rage_car_lights_release();
+    if(s_terrain_stream_buffer)p_glDeleteBuffers(1,&s_terrain_stream_buffer);
+    if(s_terrain_stream_vao)p_glDeleteVertexArrays(1,&s_terrain_stream_vao);
+    s_terrain_stream_buffer=s_terrain_stream_vao=0;
     for(int i=0;i<1024;++i){free(s_native_queue[i].palette);s_native_queue[i].palette=NULL;s_native_queue[i].palette_capacity=0;}
     if(s_vehicle_shadow_texture)glDeleteTextures(1,&s_vehicle_shadow_texture);
     s_vehicle_shadow_fbo=s_vehicle_shadow_texture=0;s_vehicle_shadow_valid=0;

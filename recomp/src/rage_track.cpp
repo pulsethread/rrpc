@@ -51,7 +51,8 @@ struct ProjectionCache {
 struct FadeView {std::vector<RageTrackFadeState> sectors;float seen=-1000;ProjectionCache current,previous;};
 std::unordered_map<uint32_t,FadeView> fade_views;
 
-struct PreparedSector {std::vector<PSXTerrainTriangle> layers[2],later[2];};
+struct PreparedSector {std::vector<PSXTerrainTriangle> layers[2],later[2];uint64_t identity[4]={};};
+uint64_t next_prepared_identity=0;
 using PreparedCourse=std::vector<PreparedSector>;
 std::vector<uint8_t> tunnel_points;
 std::shared_ptr<PreparedCourse> drawing_prepared;
@@ -61,6 +62,7 @@ std::shared_ptr<PreparedCourse> course_prepared;
 std::shared_ptr<PreparedCourse> prepare_course(const RageTrackCourse& mesh){
     auto result=std::make_shared<PreparedCourse>(mesh.sectors.size());
     for(size_t s=0;s<mesh.sectors.size();++s){const auto& sector=mesh.sectors[s];
+        for(auto& id:(*result)[s].identity)id=++next_prepared_identity;
         for(uint32_t q=sector.first;q<sector.first+sector.count;++q){
             const auto& face=mesh.faces[sector.draw_order.empty()?q:sector.draw_order[q-sector.first]];
             PSXTerrainTriangle t{};t.colour=face.colour;t.page=face.page;t.window=face.window;
@@ -490,10 +492,10 @@ extern "C" int rage_track_submit(uint32_t packet,int dx,int dy,uint32_t texture_
                 const size_t index=&sector-view.mesh->sectors.data();
                 const auto& triangles=(*view.prepared)[index].layers[layer];
                 auto camera=pose;camera.fade_start=rage_track_lod_fade()?fade.sectors[index].start:0;
-                gl_renderer_draw_terrain_batch(&camera,triangles.data(),(unsigned)triangles.size(),view.texture_source,view.unlit,texture_window);
+                gl_renderer_draw_retained_terrain(&camera,triangles.data(),(unsigned)triangles.size(),view.texture_source,view.unlit,texture_window,(*view.prepared)[index].identity[layer]);
                 count+=triangles.size();
                 if(!view.hide_later){const auto& later=(*view.prepared)[index].later[layer];
-                    gl_renderer_draw_terrain_batch(&camera,later.data(),(unsigned)later.size(),view.texture_source,view.unlit,texture_window);count+=later.size();}
+                    gl_renderer_draw_retained_terrain(&camera,later.data(),(unsigned)later.size(),view.texture_source,view.unlit,texture_window,(*view.prepared)[index].identity[layer+2]);count+=later.size();}
                 continue;
             }
             for(uint32_t q=sector.first;q<sector.first+sector.count;++q) {

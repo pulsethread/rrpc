@@ -6,16 +6,20 @@
 #include "rage_track.h"
 enum { RAGE_NATIVE_CACHE=512, RAGE_NATIVE_FLOATS=16, RAGE_NATIVE_LOOKUP=2048 };
 typedef struct RageNativeBuffer {
-    GLuint buffer, indices,shadow_indices,vao;
+    GLuint buffer, indices,shadow_indices,vao,expanded;
     int shadow_count;
     uint64_t key, touched;
     size_t bytes;
     float* content;
     int pins;
+    RageNativeMeshTags tags;
+    uint64_t serial;
 } RageNativeBuffer;
 static RageNativeBuffer s_native_meshes[RAGE_NATIVE_CACHE];
 static uint16_t s_native_lookup[RAGE_NATIVE_LOOKUP][4];
-/* At most 32 MiB of exact source payload plus at most the same GPU storage.
+/* At most 32 MiB of exact source payload. Indexed buffers plus expanded GPU
+ * gather sources use at most twice that amount; the orphaned gather stream
+ * is separately capped at 32 MiB (drivers may retain in-flight allocations).
  * Extra cache entries accommodate material/visibility variants, not an
  * unbounded allocation for every camera pose or frame. */
 static size_t s_native_retained_bytes;
@@ -26,6 +30,7 @@ static GLint s_native_directional;
 static GLint s_native_spot_count,s_native_spot_position,s_native_spot_direction,s_native_spot_colour;
 static GLint s_native_lens_count,s_native_lens_bounds,s_native_lens_position,s_native_lens_colour;
 static uint64_t s_native_clock;
+static uint64_t s_native_serial;
 static unsigned s_native_replay_cursor;
 static int s_native_conservative=0;
 static int s_native_indexed_draw=0;
@@ -139,6 +144,7 @@ static void rage_native_forget(int i) {
     if(mesh->indices)p_glDeleteBuffers(1,&mesh->indices);
     if(mesh->shadow_indices)p_glDeleteBuffers(1,&mesh->shadow_indices);
     if(mesh->vao)p_glDeleteVertexArrays(1,&mesh->vao);
+    if(mesh->expanded)p_glDeleteBuffers(1,&mesh->expanded);
     s_native_retained_bytes-=mesh->bytes;
     free(mesh->content);memset(mesh,0,sizeof(*mesh));
 }
@@ -190,6 +196,7 @@ static RageNativeBuffer* rage_native_buffer(float* vertices,size_t bytes) {
     float* content=(float*)realloc(mesh->content,bytes);
     if(!content)return 0;
     mesh->content=content;memcpy(content,vertices,bytes);
+    mesh->tags=rage_native_mesh_tags(vertices,bytes/(RAGE_NATIVE_FLOATS*sizeof(float)));
     // Keep the exact input as cache identity; repair filtering bounds only
     // on upload, so intermediate frames reuse the already prepared mesh.
     atomic_fetch_add(&s_native_region_repairs,rage_native_material_regions(vertices,bytes/(RAGE_NATIVE_FLOATS*sizeof(float))));
@@ -233,6 +240,7 @@ static RageNativeBuffer* rage_native_buffer(float* vertices,size_t bytes) {
     for(int i=0;i<5;++i){p_glEnableVertexAttribArray(i);p_glVertexAttribPointer(i,sizes[i],GL_FLOAT,GL_FALSE,64,(void*)(size_t)(offsets[i]*4));}
     atomic_fetch_add(&s_native_source_bytes,bytes);
     mesh->bytes=bytes;mesh->key=key;mesh->touched=s_native_clock;
+    mesh->serial=++s_native_serial;
     s_native_retained_bytes+=bytes;
     memmove(s_native_lookup[bucket]+1,s_native_lookup[bucket],3*sizeof(uint16_t));s_native_lookup[bucket][0]=(uint16_t)(victim+1);
     if(hint<256)s_native_replay_hints[hint]=(uint16_t)(victim+1);
@@ -278,7 +286,7 @@ static void rage_native_view_depth(void) {
     p_glBindFramebuffer(PSXGL_FRAMEBUFFER,s_hr_fbo);glDepthMask(GL_FALSE);
     glScissor(rect[0]*s_hr_scale,rect[1]*s_hr_scale,(rect[2]-rect[0]+1)*s_hr_scale,(rect[3]-rect[1]+1)*s_hr_scale);
 }
-static void rage_native_passes(int count,int semi,int decal,int background) {
+static void rage_native_range_passes(int first,int count,int semi,int decal,int background) {
     p_glUniform1i(s_native_aniso,s_tex_aniso);
     p_glUniform1f(s_native_now,rage_track_fade_clock());
     if(rage_native_has_inset()){glEnable(GL_STENCIL_TEST);glStencilMask(0);glStencilFunc(GL_EQUAL,0,0x80);glStencilOp(GL_KEEP,GL_KEEP,GL_KEEP);}else glDisable(GL_STENCIL_TEST);
@@ -292,18 +300,21 @@ static void rage_native_passes(int count,int semi,int decal,int background) {
     glDisable(GL_POLYGON_OFFSET_FILL);
     glDisable(GL_BLEND);glDepthMask(decal || background?GL_FALSE:GL_TRUE);
     p_glUniform1i(s_native_pass,semi<0?0:1);
-    if(s_native_indexed_draw)glDrawElements(GL_TRIANGLES,count,GL_UNSIGNED_INT,0);else glDrawArrays(GL_TRIANGLES,0,count);
+    if(s_native_indexed_draw)glDrawElements(GL_TRIANGLES,count,GL_UNSIGNED_INT,(void*)(size_t)(first*4));else glDrawArrays(GL_TRIANGLES,first,count);
     if(semi>=0){
         apply_psx_blend(semi);glDepthMask(GL_FALSE);
         glDisable(GL_POLYGON_OFFSET_FILL);
         p_glUniform1i(s_native_pass,2);
-        if(s_native_indexed_draw)glDrawElements(GL_TRIANGLES,count,GL_UNSIGNED_INT,0);else glDrawArrays(GL_TRIANGLES,0,count);
+        if(s_native_indexed_draw)glDrawElements(GL_TRIANGLES,count,GL_UNSIGNED_INT,(void*)(size_t)(first*4));else glDrawArrays(GL_TRIANGLES,first,count);
     }
     glDisable(GL_POLYGON_OFFSET_FILL);glDisable(GL_DEPTH_TEST);glDepthMask(GL_FALSE);
     glDisable(0x3000);glDisable(0x864F);
     if(s_native_conservative)glDisable(0x9346);
     glDisable(GL_STENCIL_TEST);glStencilMask(0x01);
     atomic_fetch_add(&s_native_draws,1);
+}
+static void rage_native_passes(int count,int semi,int decal,int background){
+    rage_native_range_passes(0,count,semi,decal,background);
 }
 #include "rage_native_scene_queue.h"
 static int rage_native_draw_batch(int count,int semi,int decal,int background) {
@@ -349,9 +360,8 @@ static int rage_native_draw_batch(int count,int semi,int decal,int background) {
         }
         return 0;
     }
-    int caster=0,player_pose=-1;
-    if(!decal && !background)for(int i=0;i<count;++i)if((int)s_native_vertices[16*i+11]&8192){caster=1;break;}
-    if(caster)for(int i=0;i<count;++i)if((int)s_native_vertices[16*i+11]&16384){player_pose=(int)s_native_vertices[16*i+9];break;}
+    const int caster=!decal && !background && mesh->tags.caster;
+    const int player_pose=caster?mesh->tags.player_pose:-1;
     return rage_native_scene_queue(mesh,count,semi,decal,background,poses,rows,lens,camera,caster,player_pose,lamps);
 }
 
@@ -362,6 +372,7 @@ static void rage_native_release(void) {
         if(s_native_meshes[i].indices)p_glDeleteBuffers(1,&s_native_meshes[i].indices);
         if(s_native_meshes[i].shadow_indices)p_glDeleteBuffers(1,&s_native_meshes[i].shadow_indices);
         if(s_native_meshes[i].vao)p_glDeleteVertexArrays(1,&s_native_meshes[i].vao);
+        if(s_native_meshes[i].expanded)p_glDeleteBuffers(1,&s_native_meshes[i].expanded);
         free(s_native_meshes[i].content);
     }
     memset(s_native_meshes,0,sizeof s_native_meshes);s_native_clock=0;
@@ -457,6 +468,26 @@ int gl_renderer_native_material_probe(void) {
             glClearColor(0,0,0,0);glClear(GL_COLOR_BUFFER_BIT);
             glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_INT,0);
             glReadPixels(128,0,256,256,GL_RGBA,GL_UNSIGNED_BYTE,after);
+            if(memcmp(before,after,sizeof before))++failures;
+            /* A nonzero index range must select the same six indices. */
+            uint32_t ranges[12]={0};memcpy(ranges+6,pack.indices,6*sizeof(uint32_t));
+            p_glBufferData(0x8893,sizeof ranges,ranges,GL_STATIC_DRAW);
+            glDepthMask(GL_TRUE);glClearDepth(1);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);s_native_indexed_draw=1;
+            rage_native_range_passes(6,6,-1,0,0);s_native_indexed_draw=0;
+            glReadPixels(128,0,256,256,GL_RGBA,GL_UNSIGNED_BYTE,after);
+            if(memcmp(before,after,sizeof before))++failures;
+            /* Gather an immutable GPU range into a stream without a CPU
+             * vertex upload. Prefix vertices intentionally draw nothing. */
+            float source[12*16]={};memcpy(source+6*16,vertices,sizeof vertices);
+            GLuint gpu_source=0;p_glGenBuffers(1,&gpu_source);
+            p_glBindBuffer(0x8F36,gpu_source);p_glBufferData(0x8F36,sizeof source,source,GL_STATIC_DRAW);
+            p_glBindBuffer(0x8F37,vbo);p_glBufferData(0x8F37,sizeof source,NULL,PSXGL_STREAM_DRAW);
+            p_glCopyBufferSubData(0x8F36,0x8F37,6*64,6*64,6*64);
+            p_glBindBuffer(0x8F36,0);p_glBindBuffer(0x8F37,0);
+            p_glBindBuffer(0x8893,0);glDepthMask(GL_TRUE);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+            rage_native_range_passes(6,6,-1,0,0);
+            glReadPixels(128,0,256,256,GL_RGBA,GL_UNSIGNED_BYTE,after);
+            p_glDeleteBuffers(1,&gpu_source);
             glClearColor(clear_colour[0],clear_colour[1],clear_colour[2],clear_colour[3]);
             if(memcmp(before,after,sizeof before))++failures;
             p_glDeleteBuffers(1,&indices);rage_native_index_release(&pack);

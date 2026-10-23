@@ -1,3 +1,24 @@
+# Release 0.3.26
+
+Reuses track geometry on the GPU to reduce repeated rendering work, and preserves more Free run scenery.
+
+- Retain terrain meshes and group compatible visible ranges on the GPU instead of rebuilding and comparing their vertices on every frame.
+- Cache shadow/player classification with immutable meshes.
+- Preserve current camera movement, mirrors, lighting, fades, detail and draw distances, with the previous rendering path available for comparison and recovery.
+- Preserve elevated road signs, bridge beams and tall supports during Free run junction cleanup. The four-course fixture retains 128 additional faces (190 triangles).
+
+### Windows download
+
+Extract `RageRacer-PC-v0.3.26.zip` into your game folder. Replace the supplied program files and retain your existing `data.dat`, saves, settings, music and mods. The data generator is unchanged.
+
+For a new installation, run `Generate Data.exe` with a supported original disc or image, then run `RageRacer.exe`. No original game data is included.
+
+### Validation and performance
+
+All 17 native tests passed. Full-lap comparisons, high-quality rendering, replay and Free run location checks passed, with zero failures in the 162-check GPU probe and no recorded graphics errors. Existing saves, game data and graphics preferences were verified unchanged.
+
+Two matched local full-lap comparisons showed approximately 8–19% lower process CPU use and higher frame throughput. Results varied substantially between runs; these are measurements on the test machine, not a guaranteed FPS increase. No visual settings or draw distances were reduced.
+
 # Release 0.3.25
 
 Fixes invisible collision barriers at Free run junctions.

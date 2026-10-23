@@ -4,6 +4,21 @@
 #include <string.h>
 #include <stdlib.h>
 typedef struct RageNativeViews {int count,rect[16][4];} RageNativeViews;
+/* These tags belong to the immutable vertex payload, including its dense
+ * pose indices. Resolve once on cache admission, not on every view/replay. */
+typedef struct RageNativeMeshTags {int caster,player_pose;} RageNativeMeshTags;
+static inline RageNativeMeshTags rage_native_mesh_tags(const float* vertices,size_t count) {
+    RageNativeMeshTags tags={0,-1};
+    int player_found=0;
+    for(size_t i=0;i<count;++i){
+        const unsigned flags=(unsigned)vertices[16*i+11];
+        if(flags&8192u)tags.caster=1;
+        if(!player_found && (flags&16384u)){tags.player_pose=(int)vertices[16*i+9];player_found=1;}
+        if(tags.caster && player_found)break;
+    }
+    if(!tags.caster)tags.player_pose=-1;
+    return tags;
+}
 /* Only proven 3D draws enter a view. UI clipping changes never call this. */
 static inline int rage_native_view_enter(RageNativeViews* views,const int rect[4]) {
     if(rect[2]<rect[0] || rect[3]<rect[1])return 0;

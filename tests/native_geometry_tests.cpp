@@ -7,6 +7,25 @@
 #define require(x) do {if(!(x))throw std::runtime_error(#x);} while(0)
 int main() {
     try {
+        // Compare cache-admission tags with the original draw-time scans.
+        // Player tags may precede caster tags or appear on another vertex;
+        // the first player pose wins, but only if the batch casts a shadow.
+        for(unsigned pattern=0;pattern<4096;++pattern){
+            float mesh[6*16]={};
+            for(unsigned i=0;i<6;++i){mesh[16*i+9]=float(i+3);
+                mesh[16*i+11]=float(((pattern>>(2*i))&3u)*8192u);}
+            int caster=0,player=-1;
+            for(unsigned i=0;i<6;++i)if((int)mesh[16*i+11]&8192){caster=1;break;}
+            if(caster)for(unsigned i=0;i<6;++i)if((int)mesh[16*i+11]&16384){player=(int)mesh[16*i+9];break;}
+            const auto tags=rage_native_mesh_tags(mesh,6);
+            require(tags.caster==caster && tags.player_pose==player);
+            for(bool decal:{false,true})for(bool background:{false,true}){
+                const int active=!decal && !background && tags.caster;
+                require(active==(!decal && !background && caster));
+                require((active?tags.player_pose:-1)==(!decal && !background && caster?player:-1));
+            }
+        }
+        require(rage_native_mesh_tags(nullptr,0).player_pose==-1);
         // Signed authored layer offsets and raw-texture mode coexist in the
         // immutable native vertex key, without touching geometry or UVs.
         {float input[32]={},output[16]={};input[13]=1;input[26]=float(255u<<10);rage_native_pack_vertex(output,input,0);
