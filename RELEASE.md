@@ -1,3 +1,23 @@
+# Release 0.3.24
+
+Updates the race minimap for clearer car positions and headings.
+
+- Enlarge the on-screen minimap by approximately 40%.
+- Replace opponent dots with smaller red triangles that rotate with each car's heading.
+- Highlight the leading opponent in green whenever an opponent is ahead of the player. Race order follows the game's total lap-progress calculation.
+- Keep the player's larger arrow blue.
+- Render the road at 50% opacity while keeping the arrow interiors opaque.
+
+### Windows download
+
+Extract `RageRacer-PC-v0.3.24.zip` into your game folder. Replace the supplied program files and retain your existing `data.dat`, saves, settings, music and mods. The data generator is unchanged.
+
+For a new installation, run `Generate Data.exe` with a supported original disc or image, then run `RageRacer.exe`. No original game data is included.
+
+### Validation
+
+All 17 native tests passed. Expanded minimap tests cover rotating opponent triangles, leader highlighting, player-leading behaviour and road/marker opacity. The Windows build completed successfully, and the enlarged minimap and directional markers were checked in-game.
+
 # Release 0.3.23
 
 Adds Free run and includes the fixes made since v0.3.22.

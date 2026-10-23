@@ -9487,7 +9487,7 @@ static void rage_minimap_present(void){
     int ww=0,wh=0;SDL_GL_GetDrawableSize(s_win,&ww,&wh);if(ww<1||wh<1)return;
     GLint viewport[4];glGetIntegerv(GL_VIEWPORT,viewport);
     const int height=viewport[3]>0?viewport[3]:wh,width=viewport[2]>0?viewport[2]:ww;
-    int size=(int)(height*.23f);if(size<80)size=80;if(size>260)size=260;if(size>width/3)size=width/3;
+    int size=(int)(height*.322f);if(size<112)size=112;if(size>364)size=364;if(size>width/3)size=width/3;
     int margin=(int)(height*.025f);if(margin<8)margin=8;
     int x=viewport[0]+margin,y=wh-viewport[1]-height+(height-size)/2;
     gl_draw_osd_image_mode(pixels,RAGE_MINIMAP_SIZE,RAGE_MINIMAP_SIZE,size,size,x,y,ww,wh,1);

@@ -28,12 +28,25 @@ void line(Image& dst,float ax,float ay,float bx,float by,float radius,uint32_t c
         float ex=x+.5f-ax-t*dx,ey=y+.5f-ay-t*dy;pixel(dst,x,y,colour,std::clamp(radius+.5f-std::sqrt(ex*ex+ey*ey),0.f,1.f));}
 }
 void point(float x,float z,float& px,float& py){fit.point(x,z,px,py);px+=side*.5f;py+=side*.5f;}
-void arrow(float x,float y,float dx,float dy){
+void arrow(float x,float y,float dx,float dy,float scale,uint32_t colour){
     const float rx=-dy,ry=dx;
-    // An outlined chevron remains readable when player and AI overlap.
-    const float tip_x=x+dx*8,tip_y=y+dy*8,left_x=x-dx*5+rx*4.5f,left_y=y-dy*5+ry*4.5f,right_x=x-dx*5-rx*4.5f,right_y=y-dy*5-ry*4.5f;
-    for(int pass=0;pass<2;++pass){const float width=pass?1.8f:3.f;const uint32_t c=pass?0x308dff:0x080b12;
-        line(image,tip_x,tip_y,left_x,left_y,width,c);line(image,tip_x,tip_y,right_x,right_y,width,c);line(image,tip_x,tip_y,x-dx*2,y-dy*2,width,c);}
+    // Filled, outlined triangles use opaque cores and antialiased edges.
+    for(int pass=0;pass<2;++pass){
+        const float pad=pass?0.f:1.2f;
+        const float tip=8*scale+pad,back=5*scale+pad,half=4.5f*scale+pad;
+        const float vx[3]={x+dx*tip,x-dx*back+rx*half,x-dx*back-rx*half};
+        const float vy[3]={y+dy*tip,y-dy*back+ry*half,y-dy*back-ry*half};
+        const float sign=((vx[1]-vx[0])*(vy[2]-vy[0])-(vy[1]-vy[0])*(vx[2]-vx[0]))>0?1.f:-1.f;
+        const int x0=std::max(0,int(std::floor(std::min({vx[0],vx[1],vx[2]})-1))),x1=std::min(side-1,int(std::ceil(std::max({vx[0],vx[1],vx[2]})+1)));
+        const int y0=std::max(0,int(std::floor(std::min({vy[0],vy[1],vy[2]})-1))),y1=std::min(side-1,int(std::ceil(std::max({vy[0],vy[1],vy[2]})+1)));
+        for(int py=y0;py<=y1;++py)for(int px=x0;px<=x1;++px){float coverage=1;
+            for(int i=0;i<3;++i){const int j=(i+1)%3;const float ex=vx[j]-vx[i],ey=vy[j]-vy[i];
+                const float distance=sign*(ex*(py+.5f-vy[i])-ey*(px+.5f-vx[i]))/std::sqrt(ex*ex+ey*ey);
+                coverage=std::min(coverage,std::clamp(distance+.5f,0.f,1.f));}
+            pixel(image,px,py,pass?colour:0x080b12,coverage);
+        }
+    }
+
 }
 }
 extern "C" void rage_minimap_clear(void){std::lock_guard<std::mutex> lock(mutex);ready=visible=false;last_tick=~0u;}
@@ -49,6 +62,8 @@ extern "C" void rage_minimap_routes(const float* xz,const int* counts,int roads)
     for(int pass=0;pass<2;++pass){int start=0;for(int r=0;r<roads;++r){for(int n=0;n<counts[r];++n){int i=start+n,next=start+(n+1)%counts[r];float ax,ay,bx,by;point(xz[2*i],xz[2*i+1],ax,ay);point(xz[2*next],xz[2*next+1],bx,by);
         line(track,ax,ay,bx,by,pass?1.f:2.3f,pass?0xffffff:0x080b12);}
         start+=counts[r];}}
+    // Fade the completed road layer once, so overlapping segments stay equally translucent.
+    for(auto& p:track)p=(p&0x00ffffffu)|((((p>>24)+1)/2)<<24);
     ready=true;
 }
 extern "C" void rage_minimap_capture(CPUState* cpu){
@@ -58,15 +73,26 @@ extern "C" void rage_minimap_capture(CPUState* cpu){
     if(!visible)return;
     const uint32_t tick=cpu->read_word(rage_region_address(0x8009e690));if(tick==last_tick)return;last_tick=tick;
     image=track;
+    const uint32_t player=rage_region_address(0x8009e6d4);
     const uint32_t rivals=rage_region_address(0x801f1854);
+    // Retail publishes a place only for the player. Rank opponents by the
+    // same total lap progress used by the game's race-position calculation.
+    auto progress=[&](uint32_t car){return int32_t(cpu->read_word(car+0x68)+cpu->read_word(car+0x6c));};
+    uint32_t leader=player;int32_t best=progress(player);
     for(int i=0;!rage_free_run_active() && i<11;++i){const uint32_t car=rivals+0x19c*i;
         if(int16_t(cpu->read_half(car+0xac))==-1 || cpu->read_word(car+0xbc)!=1)continue;
-        float x,y;point(float(int32_t(cpu->read_word(car)))*4,float(int32_t(cpu->read_word(car+8)))*4,x,y);
-        line(image,x,y,x,y,3.8f,0x080b12);line(image,x,y,x,y,2.6f,0xff3d43);
+        const int32_t distance=progress(car);if(distance>best){best=distance;leader=car;}
     }
-    const uint32_t player=rage_region_address(0x8009e6d4);float x,y,dx,dy;
+    for(int i=0;!rage_free_run_active() && i<11;++i){const uint32_t car=rivals+0x19c*i;
+        if(int16_t(cpu->read_half(car+0xac))==-1 || cpu->read_word(car+0xbc)!=1)continue;
+        float x,y,dx,dy;point(float(int32_t(cpu->read_word(car)))*4,float(int32_t(cpu->read_word(car+8)))*4,x,y);
+        rage_minimap_heading(int32_t(cpu->read_word(car+0x24)),dx,dy);
+        const bool first=car==leader;
+        arrow(x,y,dx,dy,.65f,first?0x35df64:0xff3d43);
+    }
+    float x,y,dx,dy;
     point(float(int32_t(cpu->read_word(player)))*4,float(int32_t(cpu->read_word(player+8)))*4,x,y);
-    rage_minimap_heading(int32_t(cpu->read_word(player+0x24)),dx,dy);arrow(x,y,dx,dy);
+    rage_minimap_heading(int32_t(cpu->read_word(player+0x24)),dx,dy);arrow(x,y,dx,dy,1.f,0x308dff);
 }
 extern "C" int rage_minimap_image(uint32_t* argb,int capacity){
     if(!argb || capacity<side*side)return 0;
