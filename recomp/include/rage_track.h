@@ -34,6 +34,7 @@ struct RageTrackFace {
     int8_t depth_bias=0;
     uint32_t first_triangle=0,triangle_count=0;
     uint32_t decal=0; /* Geometrically contained, coplanar ground detail. */
+    uint32_t free_run_later=0; /* Hidden behind the main tunnels from the lower stretch. */
     uint32_t coverage=0; /* Open boundary needs conservative subpixel coverage. */
 };
 struct RageTrackTriangle {
@@ -58,6 +59,8 @@ struct RageTrackCourse {
     std::vector<RageTrackTriangle> triangles;
     uint32_t source_vertices=0,tjunctions=0;
 };
+bool rage_track_has_roof(const RageTrackCourse& course,float x,float y,float z);
+std::vector<uint8_t> rage_track_tunnel_points(const RageTrackCourse& course);
 bool rage_track_build_topology(RageTrackCourse& course);
 uint32_t rage_track_stitch_geometry(RageTrackCourse& course);
 uint32_t rage_track_classify_layers(RageTrackCourse& course);

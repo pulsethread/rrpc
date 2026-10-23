@@ -2,6 +2,7 @@
 // disc fixtures. These fixtures are never packaged in the source or executable.
 #include "../recomp/src/rage_oval.cpp"
 #include <iostream>
+void rage_free_world_routes(const RageFreeRoutes&,const std::array<std::array<float,3>,4>&){}
 #define require(x) do{if(!(x))throw std::runtime_error(#x);}while(0)
 int main(int argc,char** argv){try{
  // A foreign fence across the lane is omitted; an overhead bridge and

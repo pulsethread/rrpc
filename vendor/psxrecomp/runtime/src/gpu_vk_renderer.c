@@ -2044,14 +2044,10 @@ void vk_renderer_present_cpu(const uint32_t *pixels, int src_w, int src_h,
 
     VkOffset3D dst[2];
     letterbox((int)s_sc_extent.width, (int)s_sc_extent.height, force_4_3 ? 4 : s_aspect_num, force_4_3 ? 3 : s_aspect_den, dst);
-    /* Short GP1(07h) bands: letterbox inside the 4:3 rect (see GL present). */
+    /* Fit short movie bands to the window with their original pixel aspect. */
     if (src_h > 0 && src_h < 240) {
-        int box_h = dst[1].y - dst[0].y;
-        int content_h = (box_h * src_h) / 240;
-        if (content_h < 1) content_h = 1;
-        int y0 = dst[0].y + (box_h - content_h) / 2;
-        dst[0].y = y0;
-        dst[1].y = y0 + content_h;
+        letterbox((int)s_sc_extent.width, (int)s_sc_extent.height,
+                  4 * 240, 3 * src_h, dst);
     }
     VkImageBlit blit = {0};
     blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT; blit.srcSubresource.layerCount = 1;

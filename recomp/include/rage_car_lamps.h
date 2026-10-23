@@ -9,6 +9,9 @@ typedef struct RageCarLamp {uint32_t material;float bounds[4];struct {float x,y,
 typedef struct RageCarLightReceipt {uint32_t entity,asset,entry,tick;float head,tail,stop,speed;} RageCarLightReceipt;
 typedef struct RageCarLightPose {RageCarLightReceipt lamps;float world[12];} RageCarLightPose;
 typedef struct RageCarLightState {float head,tail,stop,dark;int automatic;} RageCarLightState;
+static inline int rage_car_lights_required(uint32_t clock,int in_tunnel){
+    return in_tunnel || clock<0x1154 || clock>=0x54a0;
+}
 static inline void rage_car_light_update(RageCarLightState* s,float shelter,int brake,float dt){
     if(!isfinite(dt)||dt<=0)return;
     if(shelter<.28f){s->dark=fminf(.6f,s->dark+dt);if(s->dark>=.6f)s->automatic=1;}

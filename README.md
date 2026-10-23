@@ -113,6 +113,13 @@ See docs/Music.txt for the exported original song/CD-number mappings.
 For the full explanation of playback, custom songs, confirmation and title
 scrolling, see [How the music system works](docs/Music-System.md).
 
+## Free run
+
+Choose Free run from the title menu to select a vehicle and drive freely across
+the three main courses and Extreme Oval. The combined minimap shows all four
+routes. Lap timing, finish triggers and wrong-way penalties are disabled.
+Choose Exit from vehicle selection to return to the title menu.
+
 See RELEASE.md for the current release and minimal portable folder contents.
 
 Download the two Windows executables from the [latest release](https://github.com/pulsethread/rrpc/releases/latest),

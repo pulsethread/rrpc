@@ -1,3 +1,25 @@
+# Release 0.3.23
+
+Adds Free run and includes the fixes made since v0.3.22.
+
+- Add a Free run entry with direct vehicle selection and an Exit option returning to the title menu.
+- Combine the three main courses and Extreme Oval into one drivable network, with a combined minimap and unlimited driving without lap timing, finish triggers or wrong-way penalties.
+- Hide later main-course sections while driving along the lower stretch between the main tunnels; keep Extreme Oval visible.
+- Preserve road decks and side rails during junction cleanup, and prevent hidden upper-course geometry from clipping holes into visible track.
+- Activate automatic headlights and tail lights only under sustained tunnel roofs or during the game's night-time period. Brake lights continue to respond to braking.
+- Remove the Time Attack logo, course name and best times from the Free run pre-race screen.
+- Correct opening-video scaling and preserve the title-screen trademark artwork alongside the new menu textures.
+
+### Windows download
+
+Extract `RageRacer-PC-v0.3.23.zip` into your game folder. Replace the supplied program files and retain your existing `data.dat`, saves, settings, music and mods. The data generator is unchanged.
+
+For a new installation, run `Generate Data.exe` with a supported original disc or image, then run `RageRacer.exe`. No original game data is included.
+
+### Validation
+
+All 17 native tests passed. The Windows build completed successfully. In-game checks verified the Free run pre-race screen and driving on all four routes. Tunnel roof, short-overpass and night-time boundary tests passed. Track geometry checks do not constitute a visual inspection of every polygon.
+
 # Release 0.3.22
 
 Add a live minimap at the middle left of the racing view. The complete track

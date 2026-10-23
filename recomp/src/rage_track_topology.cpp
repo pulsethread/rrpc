@@ -377,3 +377,25 @@ uint32_t rage_track_stitch_geometry(RageTrackCourse& m){
     for(auto& s:m.sectors){for(int k=0;k<3;++k){s.lo[k]=1e30f;s.hi[k]=-1e30f;}for(uint32_t i=s.first;i<s.first+s.count;++i){const auto& f=m.faces[i];for(uint32_t j=f.first_triangle;j<f.first_triangle+f.triangle_count;++j)for(uint32_t v:m.triangles[j].vertex)for(int k=0;k<3;++k){s.lo[k]=std::min(s.lo[k],m.vertices[v][k]);s.hi[k]=std::max(s.hi[k],m.vertices[v][k]);}}}
     return repaired;
 }
+
+// A roof must be directly above the road, at tunnel ceiling height.
+bool rage_track_has_roof(const RageTrackCourse& mesh,float x,float y,float z){
+    for(const auto& f:mesh.faces)for(const auto& ids:{std::array<int,3>{0,1,2},std::array<int,3>{2,1,3}}){
+        const auto& a=mesh.vertices[f.vertex[ids[0]]];const auto& b=mesh.vertices[f.vertex[ids[1]]];const auto& c=mesh.vertices[f.vertex[ids[2]]];
+        if(x<std::min({a[0],b[0],c[0]}) || x>std::max({a[0],b[0],c[0]}) || z<std::min({a[2],b[2],c[2]}) || z>std::max({a[2],b[2],c[2]}))continue;
+        const double ex=b[0]-a[0],ez=b[2]-a[2],fx=c[0]-a[0],fz=c[2]-a[2],det=ex*fz-ez*fx;if(std::abs(det)<1)continue;
+        const double u=((x-a[0])*fz-(z-a[2])*fx)/det,v=(ex*(z-a[2])-ez*(x-a[0]))/det;
+        if(u<0 || v<0 || u+v>1)continue;
+        const double gap=y-(a[1]+u*(b[1]-a[1])+v*(c[1]-a[1]));
+        if(gap>240 && gap<2048)return true;
+    }
+    return false;
+}
+std::vector<uint8_t> rage_track_tunnel_points(const RageTrackCourse& mesh){
+    std::vector<uint8_t> roof(mesh.route.size());
+    for(size_t i=0;i<roof.size();++i){const auto& p=mesh.route[i];roof[i]=p.left>0 && rage_track_has_roof(mesh,p.x,p.y,p.z);}
+    // Short overhead bridges and isolated scenery do not constitute tunnels.
+    for(size_t i=0;i<roof.size();){if(!roof[i]){++i;continue;}const size_t start=i;while(i<roof.size() && roof[i])++i;
+        if(i-start<8)std::fill(roof.begin()+start,roof.begin()+i,0);}
+    return roof;
+}

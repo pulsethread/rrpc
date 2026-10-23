@@ -4,6 +4,8 @@
 #include <limits>
 #include <initializer_list>
 int main(){
+    for(uint32_t clock:{0u,0x1153u,0x54a0u,0x6000u})assert(rage_car_lights_required(clock,0));
+    for(uint32_t clock:{0x1154u,0x3000u,0x549fu}){assert(!rage_car_lights_required(clock,0));assert(rage_car_lights_required(clock,1));}
     RageCarLightState s{};
     for(int i=0;i<10;++i)rage_car_light_update(&s,1,0,.04f);
     assert(s.head==0 && s.tail==0 && s.stop==0);

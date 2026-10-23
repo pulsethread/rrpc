@@ -1,3 +1,50 @@
+# Free run texture and road-contact correction
+
+Bind both retained texture banks per surface using that donor's render-table
+section bounds and its event walk-start offset. The active course needs the
+same treatment: its stock global texture swap cannot choose textures for a
+world containing several stretches at once. Donor and active faces now retain
+their own course and bank through clipping and native terrain publication.
+
+Road selection measures authored curvature centres, tangent angles, asymmetric
+lane widths and camber, including segment end planes. It accounts for car-hull
+clearance and predicted motion before choosing a junction exit. The old chord
+search could select an adjacent segment whose original collision clamp then
+pushed the car. Only player lap-progress placement selects a road ring; the
+original FindTrackSegment routine handles other calls without changing global
+road pointers.
+
+Regressions cover circular-road offsets, both texture banks on BIG/MID/HI,
+authored curved centreline sweeps, lane clearance and bridge height. Live checks
+sample the unique stretches and tight curves in all four road networks.
+
+# Free run unified world
+
+Free run combines BIG, MID, HI and the actual OVAL5 road into one retained
+terrain mesh. OVAL1 contains BIG's placeholder route. Match authored surface
+shapes to the loaded course once, keep those alignments through the union,
+and translate each corresponding road point and curvature centre together.
+Subtract coplanar donor surfaces from the existing union, interpolate UVs on
+clipped edges, repair seams, and omit raised barriers within any road corridor.
+Separate corridor sentinels prevent invented links between road rings.
+
+Keep original course texture snapshots per donor. Terrain source bits survive
+both immediate and retained OpenGL submission. The minimap fits all four rings;
+player and ground sampling use the combined world.
+
+Free run's native FindTrackSegment / AccumulateLapProgress overrides select an
+original road ring by position, stable rendered height, lane width and predicted
+motion, with hysteresis on shared roads. Original 24-byte road points and arc
+centres are published in trusted expansion memory. Retail temporarily uses the
+primary car-height word as contact scratch, so it cannot select an elevated road.
+Keep the original track-length range for bounded event and texture indexing;
+Free run continues to bypass lap timing, finishes and record writes.
+
+Validation includes all original native contracts, fixture-based mesh assembly,
+continuous sampling of every road, shared junctions, and a regression with the
+transient height pointer observed during live driving. Disc assets remain local
+and are imported from the user's verified game data at runtime.
+
 # Live race minimap (0.3.22)
 
 Read the complete centreline already decoded with each course and cache an

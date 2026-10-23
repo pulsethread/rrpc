@@ -9462,12 +9462,17 @@ static NetplayVblankEpilogue sdl_vblank_present_body(void) {
     int dst_w = pin_43 ? 640 * tex_scale : g_logical_w;
     int dst_h = 480 * tex_scale;
     SDL_Rect dst = { (g_logical_w - dst_w) / 2, 0, dst_w, dst_h };
-    /* Match GL: short display bands letterbox inside the 4:3 rect. */
+    /* Fit short movie bands to the available logical canvas. */
     if (pin_43 && present_h > 0 && present_h < 240) {
-        int content_h = (dst_h * (int)present_h) / 240;
-        if (content_h < 1) content_h = 1;
-        dst.y = (dst_h - content_h) / 2;
-        dst.h = content_h;
+        /* Fit the active movie band, preserving its PSX pixel aspect. */
+        dst.w = g_logical_w;
+        dst.h = std::max(1, dst.w * 3 * (int)present_h / (4 * 240));
+        if (dst.h > dst_h) {
+            dst.h = dst_h;
+            dst.w = dst.h * 4 * 240 / (3 * (int)present_h);
+        }
+        dst.x = (g_logical_w - dst.w) / 2;
+        dst.y = (dst_h - dst.h) / 2;
     }
     /* Match GL depth24 nearest present — linear AA fringes short FMV bands
      * into the pad/unwritten row. Restore AA scale mode for 15-bit frames. */

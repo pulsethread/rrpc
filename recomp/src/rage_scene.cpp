@@ -21,6 +21,8 @@ using rage_scene_math::native_matrix;
 extern "C" int psx_game_text_native_ok_full(uint32_t);
 using rage_scene_math::determinant;
 
+extern "C" int rage_track_in_tunnel(float,float,float);
+
 namespace {
 struct Node {
     uint32_t id, tick=0; bool captured=false, history=false;
@@ -47,20 +49,12 @@ uint16_t (*scene_read_half)(uint32_t)=nullptr;
 uint32_t guest_word(uint32_t p){return scene_read_word(rage_region_address(p));}
 uint8_t guest_byte(uint32_t p){return uint8_t(scene_read_half(p&~1u)>>(8*(p&1)));}
 float car_shelter(uint32_t car){
-    const uint32_t table=guest_word(0x801e4150)&0x1fffffffu;
-    if(table<0x10000 || table>0x200000-0xb64)return 1;
-    int32_t position=int32_t(scene_read_word(car+0x70));
-    if(guest_word(0x801e408c))position=int32_t(guest_word(0x801e40d8)-uint32_t(position));
-    for(int i=0;i<20;++i){const uint32_t p=table+0xa74+12*i;
-        const int32_t start=int32_t(scene_read_word(p)),end=int32_t(scene_read_word(p+4));
-        if(start==-1)break;if(position<=start || position>=end)continue;
-        const int code=int16_t(scene_read_half(p+8));
-        if(code==2)return 1;
-        if(code==-3)return end-position<256?.25f:1.f;
-        const int distance=std::min(position-start,end-position);
-        const float blend=code<0?1.f:std::min(256,distance)/256.f;
-        return 1-.75f*blend;
-    }return 1;
+    const uint32_t clock=guest_word(0x8019c8fc);
+    if(rage_car_lights_required(clock,0))return .25f;
+    const float x=float(int32_t(scene_read_word(car)))*4;
+    const float y=float(int32_t(scene_read_word(car+0x60)))*4;
+    const float z=float(int32_t(scene_read_word(car+8)))*4;
+    return rage_track_in_tunnel(x,y,z)?.25f:1.f;
 }
 RageCarLightReceipt car_light_receipt(uint32_t car,bool player,uint32_t entry,uint32_t tick){
     RageCarLightReceipt result{};

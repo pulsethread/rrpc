@@ -6834,20 +6834,17 @@ void gl_renderer_present(const uint32_t *pixels, int src_w, int src_h, int linea
         letterbox_rect_aspect(ww, wh, 4, 3, &lx, &ly, &lw, &lh);
     else
         letterbox_rect(ww, wh, &lx, &ly, &lw, &lh);
-    /* Short GP1(07h) bands (MotK FMV is 128 lines) only fill a fraction of
-     * NTSC active height on hardware. Stretching them to the full letterbox
-     * doubles vertical scale vs horizontal and makes the frame look too wide
-     * with the right edge clipped. Letterbox within the present rect instead.
-     * Apply whenever the source is short — not only when force_4_3 — so a
-     * misclassified FMV frame still keeps correct pixel aspect. */
+    /* Short GP1(07h) bands retain their aspect relative to the 240-line
+     * field, but can expand uniformly to use the available window space. */
     /* Genuinely windowed video bands only (<80% of the 240-line field, e.g.
      * MotK's 128-line FMV). A game's native short display mode (216/224)
      * fills the rect as on hardware. */
     if (src_h > 0 && src_h < 192) {
-        int content_h = (lh * src_h) / 240;
-        if (content_h < 1) content_h = 1;
-        ly += (lh - content_h) / 2;
-        lh = content_h;
+        /* Fit the movie itself, rather than its surrounding 240-line field.
+         * Preserve the field's pixel aspect, filling width until height limits
+         * the scale. This also handles ultrawide windows without cropping. */
+        letterbox_rect_aspect(ww, wh, 4 * 240, 3 * src_h,
+                              &lx, &ly, &lw, &lh);
     }
     /* Optional trailing-column crop (depth24 margin): shrink the draw width
      * left-aligned so cleared black remains on the right — never stretch. */
@@ -14306,7 +14303,7 @@ static void rage_terrain_replay(const RageTerrainBatchHeader* h,
             v->r=(t->colour&255)/255.0;v->g=((t->colour>>8)&255)/255.0;v->b=((t->colour>>16)&255)/255.0;
         }
         const unsigned op=t->colour>>24;const uint16_t clut=t->clut[h->unlit!=0];
-        p.args[0]=(t->page&0x8000)?t->page:(t->page&0x1ff)|(h->source<<9);
+        p.args[0]=(t->page&0xfe00)?t->page:(t->page&0x1ff)|(h->source<<9);
         p.args[1]=(clut&63)*16;p.args[2]=(clut>>6)&511;
         p.args[3]=op&1;p.args[4]=(op&2)?((t->page>>5)&3):-1;p.args[5]=1;
         RtCmd draw={sizeof(RtCmd)+sizeof p,RTH_PROJ_TRI,flags,sizeof p,0};

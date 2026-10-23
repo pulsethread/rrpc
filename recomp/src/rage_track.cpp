@@ -7,6 +7,8 @@
 #include "native_terrain_publication.h"
 #include "rage_scene.h"
 #include "rage_minimap.h"
+#include "rage_free_world.h"
+#include "rage_free_run.h"
 #include "cpu_state.h"
 #include "execution_profile.h"
 #include "native_terrain_mirror.h"
@@ -49,8 +51,9 @@ struct ProjectionCache {
 struct FadeView {std::vector<RageTrackFadeState> sectors;float seen=-1000;ProjectionCache current,previous;};
 std::unordered_map<uint32_t,FadeView> fade_views;
 
-struct PreparedSector {std::vector<PSXTerrainTriangle> layers[2];};
+struct PreparedSector {std::vector<PSXTerrainTriangle> layers[2],later[2];};
 using PreparedCourse=std::vector<PreparedSector>;
+std::vector<uint8_t> tunnel_points;
 std::shared_ptr<PreparedCourse> drawing_prepared;
 std::shared_ptr<PreparedCourse> course_prepared;
 // Like the native port's mesh templates, bake only camera-independent data.
@@ -80,7 +83,7 @@ std::shared_ptr<PreparedCourse> prepare_course(const RageTrackCourse& mesh){
             for(uint32_t i=face.first_triangle;i<face.first_triangle+face.triangle_count;++i){
                 const auto& tri=mesh.triangles[i];memcpy(t.uv,tri.uv,sizeof t.uv);
                 for(int k=0;k<3;++k)memcpy(t.local+3*k,mesh.vertices[tri.vertex[k]].data(),12);
-                (*result)[s].layers[face.decal!=0].push_back(t);
+                (face.free_run_later?(*result)[s].later[face.decal!=0]:(*result)[s].layers[face.decal!=0]).push_back(t);
             }
         }
     }
@@ -103,6 +106,7 @@ struct PointHash { size_t operator()(const Point& p)const {
 struct Packet {uint32_t address,count;std::array<uint32_t,12> words;};
 struct View {
     uint32_t start=0,end=0,ctx=0,ret=0,sp=0,tick=0,key=0,unlit=0,texture_source=0;
+    bool hide_later=false;
     RageSceneVertex pose{};
     std::shared_ptr<RageTrackCourse> mesh;
     std::shared_ptr<PreparedCourse> prepared;
@@ -252,7 +256,16 @@ bool rage_track_decode(CPUState* cpu,uint32_t grid,uint32_t table,uint32_t pool,
 }
 
 extern "C" int rage_track_ground_height(float x,float z,float near_y,float* height){
-    return course && height && rage_track_sample_ground(*course,x,z,near_y,*height);
+    const auto& ground=rage_free_run_active() && rage_free_world_ready()?drawing_course:course;
+    return ground && height && rage_track_sample_ground(*ground,x,z,near_y,*height);
+}
+extern "C" int rage_track_in_tunnel(float x,float y,float z){
+    if(!drawing_course)return 0;
+    const auto& mesh=*drawing_course;double best=1e30;size_t nearest=mesh.route.size();
+    for(size_t i=0;i<mesh.route.size();++i){const auto& p=mesh.route[i];if(p.left<=0)continue;
+        const double dx=x-p.x,dz=z-p.z,dy=y-p.y,score=dx*dx+dz*dz+16*dy*dy;
+        if(score<best){best=score;nearest=i;}}
+    return nearest<tunnel_points.size() && tunnel_points[nearest] && rage_track_has_roof(mesh,x,y,z);
 }
 extern "C" void rage_track_enable(int on) {
     if(enabled==(on!=0))return;
@@ -262,6 +275,7 @@ extern "C" void rage_track_enable(int on) {
     rage_sky_reset();
 }
 extern "C" void rage_track_reset(void) {
+    rage_free_world_reset();
     rage_minimap_clear();
     rage_sky_reset();
     course.reset();drawing_course.reset();drawing_prepared.reset();views.clear();history.clear();fade_views.clear();pending={};
@@ -284,7 +298,7 @@ extern "C" void rage_track_dispatch(CPUState* cpu,uint32_t target) {
     if(!enabled)return;
     rage_sky_dispatch(cpu,target);
     if(pending.ret && (target==pending.ret || cpu->gpr[29]>pending.sp))finish(cpu);
-    if(target==0x17ad0) {rage_minimap_clear();course.reset();course_prepared.reset();drawing_course.reset();drawing_prepared.reset();views.clear();history.clear();fade_views.clear();pending={};rage_sky_reset();return;}
+    if(target==0x17ad0) {rage_free_world_reset();rage_minimap_clear();course.reset();course_prepared.reset();drawing_course.reset();drawing_prepared.reset();views.clear();history.clear();fade_views.clear();pending={};rage_sky_reset();return;}
     if(target!=0x27ff4 || cpu->gpr[4]!=0x1f800000)return;
     const uint32_t new_tick=cpu->read_word(rage_region_address(0x8009e690));
     if(capture_tick!=new_tick){views.clear();capture_tick=new_tick;pending={};}
@@ -302,13 +316,17 @@ extern "C" void rage_track_dispatch(CPUState* cpu,uint32_t target) {
                 loaded->route.push_back({float(int32_t(cpu->read_word(p))*4.0),float(int16_t(cpu->read_half(p+8))*4),float(int32_t(cpu->read_word(p+4))*4.0),float(cpu->read_half(p+16)*4),float(cpu->read_half(p+18)*4)});
             }}
         auto scenery=std::make_shared<RageTrackCourse>();
-        drawing_course=rage_oval_extend(*loaded,*scenery)?scenery:loaded;
+        const unsigned variant=cpu->read_word(rage_region_address(0x8009e6a4)),kind=cpu->read_word(rage_region_address(0x801e428c))&3;
+        const bool extended=rage_free_run_active()?rage_free_world_build(*loaded,*scenery,variant,kind):rage_oval_extend(*loaded,*scenery);
+        drawing_course=extended?scenery:loaded;
+        tunnel_points=rage_track_tunnel_points(*drawing_course);
         course_prepared=prepare_course(*loaded);
         drawing_prepared=drawing_course==loaded?course_prepared:prepare_course(*drawing_course);
         fade_views.clear();course=std::move(loaded);course_grid=grid;course_table=table;course_pool=pool;
         std::vector<float> map_points;map_points.reserve(course->route.size()*2);
         for(const auto& p:course->route){map_points.push_back(p.x);map_points.push_back(p.z);}
         rage_minimap_route(map_points.data(),int(course->route.size()));
+        if(rage_free_run_active())rage_free_world_minimap();
         loads.fetch_add(1,std::memory_order_relaxed);vertex_count=course->vertices.size();face_count=course->faces.size();
         history.clear();
     }
@@ -322,6 +340,7 @@ extern "C" void rage_track_dispatch(CPUState* cpu,uint32_t target) {
     pending.tick=new_tick;pending.key=pending.ret^(cpu->read_word(pending.ctx+0x68)?0x1000000u:0);
     rage_scene_lights_capture(cpu,new_tick);
     pending.unlit=cpu->read_word(pending.ctx+0x84)!=0;
+    pending.hide_later=rage_free_world_hide_later(cpu);
     // Capture exactly the stock renderer's visible sector identities. Native
     // interpolation reuses this selection rather than extending it off-camera.
     if(pending.stock_distance){const uint32_t cells=cpu->gpr[5],count=cpu->gpr[6];
@@ -472,11 +491,14 @@ extern "C" int rage_track_submit(uint32_t packet,int dx,int dy,uint32_t texture_
                 const auto& triangles=(*view.prepared)[index].layers[layer];
                 auto camera=pose;camera.fade_start=rage_track_lod_fade()?fade.sectors[index].start:0;
                 gl_renderer_draw_terrain_batch(&camera,triangles.data(),(unsigned)triangles.size(),view.texture_source,view.unlit,texture_window);
-                count+=triangles.size();continue;
+                count+=triangles.size();
+                if(!view.hide_later){const auto& later=(*view.prepared)[index].later[layer];
+                    gl_renderer_draw_terrain_batch(&camera,later.data(),(unsigned)later.size(),view.texture_source,view.unlit,texture_window);count+=later.size();}
+                continue;
             }
             for(uint32_t q=sector.first;q<sector.first+sector.count;++q) {
                 const auto& face=view.mesh->faces[sector.draw_order.empty()?q:sector.draw_order[q-sector.first]];
-                if(face.decal!=unsigned(layer))continue;
+                if(face.decal!=unsigned(layer) || (view.hide_later && face.free_run_later))continue;
                 // Unlit stream handlers select the adjacent authored palette.
                 // The stored CLUT is the lit variant, not always the final material.
                 const uint16_t clut=(uint16_t)(face.clut+
@@ -525,7 +547,7 @@ extern "C" int rage_track_submit(uint32_t packet,int dx,int dy,uint32_t texture_
                     }
                     const unsigned op=face.colour>>24;
                     if(window!=face.window){gr_set_texture_window(face.window);window=face.window;}
-                    gl_renderer_draw_projected_triangle(vertices,uint16_t((face.page&0x8000)?face.page:(face.page&0x1ff)|(view.texture_source<<9)),(clut&63)*16,
+                    gl_renderer_draw_projected_triangle(vertices,uint16_t((face.page&0xfe00)?face.page:(face.page&0x1ff)|(view.texture_source<<9)),(clut&63)*16,
                         (clut>>6)&511,op&1,(op&2)?((face.page>>5)&3):-1,1);
                     ++count;
                 }

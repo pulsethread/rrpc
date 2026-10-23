@@ -1,6 +1,7 @@
 #include "rage_minimap.h"
 #include "rage_minimap_math.h"
 #include "rage_region.h"
+#include "rage_free_run.h"
 #include "cpu_state.h"
 #include <array>
 #include <mutex>
@@ -37,11 +38,17 @@ void arrow(float x,float y,float dx,float dy){
 }
 extern "C" void rage_minimap_clear(void){std::lock_guard<std::mutex> lock(mutex);ready=visible=false;last_tick=~0u;}
 extern "C" void rage_minimap_route(const float* xz,int count){
+    rage_minimap_routes(xz,&count,1);
+}
+extern "C" void rage_minimap_routes(const float* xz,const int* counts,int roads){
     std::lock_guard<std::mutex> lock(mutex);ready=visible=false;last_tick=~0u;
+    if(!counts || roads<1 || roads>4)return;
+    int count=0;for(int r=0;r<roads;++r){if(counts[r]<2)return;count+=counts[r];}
     if(!fit.build(xz,count,side-32.f))return;
     track.fill(0);
-    for(int pass=0;pass<2;++pass)for(int i=0;i<count;++i){int next=(i+1)%count;float ax,ay,bx,by;point(xz[2*i],xz[2*i+1],ax,ay);point(xz[2*next],xz[2*next+1],bx,by);
+    for(int pass=0;pass<2;++pass){int start=0;for(int r=0;r<roads;++r){for(int n=0;n<counts[r];++n){int i=start+n,next=start+(n+1)%counts[r];float ax,ay,bx,by;point(xz[2*i],xz[2*i+1],ax,ay);point(xz[2*next],xz[2*next+1],bx,by);
         line(track,ax,ay,bx,by,pass?1.f:2.3f,pass?0xffffff:0x080b12);}
+        start+=counts[r];}}
     ready=true;
 }
 extern "C" void rage_minimap_capture(CPUState* cpu){
@@ -52,7 +59,7 @@ extern "C" void rage_minimap_capture(CPUState* cpu){
     const uint32_t tick=cpu->read_word(rage_region_address(0x8009e690));if(tick==last_tick)return;last_tick=tick;
     image=track;
     const uint32_t rivals=rage_region_address(0x801f1854);
-    for(int i=0;i<11;++i){const uint32_t car=rivals+0x19c*i;
+    for(int i=0;!rage_free_run_active() && i<11;++i){const uint32_t car=rivals+0x19c*i;
         if(int16_t(cpu->read_half(car+0xac))==-1 || cpu->read_word(car+0xbc)!=1)continue;
         float x,y;point(float(int32_t(cpu->read_word(car)))*4,float(int32_t(cpu->read_word(car+8)))*4,x,y);
         line(image,x,y,x,y,3.8f,0x080b12);line(image,x,y,x,y,2.6f,0xff3d43);
