@@ -21,6 +21,7 @@ unsigned current=0;
 bool ready=false,installed=false;
 uint32_t original_points=0,original_count=0,original_arcs=0,original_length=0;
 uint64_t switches=0;
+uint32_t junction_limits=0;
 uint16_t half(const std::vector<uint8_t>& b,size_t p){return uint16_t(b.at(p)|(b.at(p+1)<<8));}
 uint32_t word(const std::vector<uint8_t>& b,size_t p){return half(b,p)|(uint32_t(half(b,p+2))<<16);}
 void put(std::vector<uint8_t>& b,size_t p,uint32_t v,unsigned size=4){for(unsigned i=0;i<size;++i)b.at(p+i)=uint8_t(v>>(8*i));}
@@ -51,6 +52,27 @@ Hit closest(double x,double y,double z,bool all,unsigned preferred,double predic
         }
     }
     return best;
+}
+// Check each corner against the union of physical roads, never a bridge above
+// or below the car. This opens junctions without opening the outside guardrail.
+bool junction_footprint(CPUState* c,uint32_t car,double x,double y,double z,unsigned selected){
+    constexpr double unit=6.283185307179586/4096.;
+    const double angle=(c->read_word(car+0x24)&4095)*unit,cs=std::cos(angle),sn=std::sin(angle);
+    const uint32_t hull=rage_region_address(0x8007dab0);
+    bool crosses=false;
+    for(unsigned corner=0;corner<4;++corner){
+        const double hx=int16_t(c->read_half(hull+4*corner))*4.,hz=int16_t(c->read_half(hull+4*corner+2))*4.;
+        const double px=x+cs*hx+sn*hz,pz=z-sn*hx+cs*hz;
+        bool covered=false,on_selected=false;
+        for(unsigned r=0;r<4;++r){
+            for(unsigned i=0;i<roads[r].count;++i){const auto h=contact(roads[r],i,px,pz);
+                if(h.end_distance<=2 && h.clearance>=0 && std::abs(h.height-y)<=64){covered=true;if(r==selected)on_selected=true;break;}
+            }
+        }
+        if(!covered)return false;
+        crosses|=!on_selected;
+    }
+    return crosses;
 }
 bool publish(CPUState* c){
     if(installed)return true;
@@ -109,7 +131,8 @@ void rage_free_world_minimap(){
 }
 
 int rage_free_world_dispatch(CPUState* c,uint32_t target){
-    if(target!=0x2c168)return 0;
+    const bool collision=target==0x31298;
+    if(target!=0x2c168 && !collision)return 0;
     if(!ready || !rage_free_run_active() || read(c,0x801e42e4)!=12)return 0;
     const uint32_t car=c->gpr[4],physical=car&0x1fffffffu;
     if(physical<0x10000 || physical>0x200000-0x19c || !publish(c))return 0;
@@ -130,6 +153,27 @@ int rage_free_world_dispatch(CPUState* c,uint32_t target){
         c->write_word(car+0x30,hit.index);
         const uint32_t progress=uint32_t(uint64_t(road.prefix[hit.index])*original_length/std::max(1u,road.length));
         c->write_word(car+0x68,progress);
+    }
+    if(collision){
+        c->gpr[5]=hit.index;
+        const uint32_t limits=c->gpr[6],lp=limits&0x1fffffffu;
+        const auto h=contact(road,hit.index,x,z);
+        if(lp>=0x10000 && lp<=0x200000-8 && h.clearance>=0 && h.clearance<128 && junction_footprint(c,car,x,y,z,current)){
+            if(!junction_limits)junction_limits=psx_mod_memory_alloc(8,4);
+            if(junction_limits){
+                const auto a=road_point(road,hit.index),b=road_point(road,hit.index+1);
+                const double t=std::clamp(h.along/std::max(1u,a.length),0.,1.);
+                const double left=a.left*(1-t)+b.left*t,right=a.right*(1-t)+b.right*t;
+                const int leftInset=int16_t(c->read_half(limits+2)),rightInset=int16_t(c->read_half(limits));
+                c->write_half(junction_limits,uint16_t(std::min(rightInset,int(std::floor(right-h.lateral-2)))));
+                c->write_half(junction_limits+2,uint16_t(std::max(leftInset,int(std::ceil(-left-h.lateral+2)))));
+                c->write_word(junction_limits+4,c->read_word(limits+4));
+                c->gpr[6]=junction_limits;
+            }
+        }
+        // Let the original contact routine compute height, banking, surface
+        // response and collisions with the remaining outside road boundaries.
+        return 0;
     }
     c->pc=c->gpr[31];return 1;
 }

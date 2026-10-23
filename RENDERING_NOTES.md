@@ -821,3 +821,14 @@ Validation: eight native contracts passed; independent music unit passed Europe/
 Final full-lap observation(scale4/AA3/filter0/32:9/Unlimited/extended1/effectsOFF): wall124.174s, processCPU204.500s, guestticks3104, measuredreal+generatedframes22536. This is functional/profiling evidence, not a controlled speedup comparison against builds from earlier sessions. Earlier final033-circuit inherited current userfilter2; do not label it filter0. Music dispatch work is gated topre-race; live races avoid the additional helpercall on everyguest dispatch. Performance0.3.1 publication release and MP3 0.3.2 were installed and verified before this follow-up.
 
 Current user requests completed. Remaining architectural possibilities from earlier notes are future improvements, not unfinished acceptance requirements. Do not resume old pending steps or schedule stale continuations.
+
+
+### Free run junction collision boundaries
+
+Free run now reselects the physical route immediately before the retail
+UpdateCarTrackState contact routine, updating its segment argument as well as
+the active road table. At junctions, boundary insets can be relaxed only when
+all four car collision corners lie within the union of adjoining road corridors
+at the same height. Road edges without a neighbouring road, and crossings at
+a different height, retain the original collision response. Height, banking,
+surface response and the remaining boundary checks still use the retail routine.

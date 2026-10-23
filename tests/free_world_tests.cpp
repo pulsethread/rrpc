@@ -91,6 +91,34 @@ int main(int argc,char** argv){
         assert(rw(car+0x30)<roads[r].count && rw(0x801e40d8)==100000);
         assert(rage_free_world_dispatch(&cpu,0x30eb4)==0); // Stock segment search remains authoritative.
     }
+    // Collision-time lookup must replace a stale segment argument before the
+    // retail boundary routine can push the player back onto the old course.
+    const uint32_t limits=0x80170000,hull=0x8007dab0;
+    const int corners[4][2]={{-15,20},{15,20},{-8,-10},{8,-10}};
+    for(unsigned i=0;i<4;++i){wh(hull+4*i,uint16_t(corners[i][0]));wh(hull+4*i+2,uint16_t(corners[i][1]));}
+    wh(limits,60);wh(limits+2,uint16_t(-60));ww(limits+4,0x00040003);
+    for(unsigned r=0;r<4;++r){current=(r+1)%4;const auto& p=samples[r];
+        ww(car,uint32_t(p[0]));ww(car+8,uint32_t(p[2]));ww(car+0x60,uint32_t(p[1]));
+        ww(car+16,0);ww(car+24,0);cpu.gpr[5]=9999;cpu.gpr[6]=limits;cpu.pc=0x80031298;
+        assert(rage_free_world_dispatch(&cpu,0x31298)==0);
+        assert(current==r && cpu.gpr[5]<roads[r].count && cpu.pc==0x80031298);
+        assert(rw(limits)==0xffc4003c && rw(limits+4)==0x00040003);
+    }
+    unsigned junctions=0;
+    for(unsigned r=0;r<4 && junctions<6;++r)for(unsigned i=0;i<roads[r].count && junctions<6;++i){
+        const auto a=road_point(roads[r],i);const double angle=a.angle*6.283185307179586/4096.;
+        for(double lateral:{-a.left+10,a.right-10}){
+            const double x=a.x-std::sin(angle)*lateral,z=a.z+std::cos(angle)*lateral;
+            const double y=contact(roads[r],i,x,z).height;
+            ww(car+0x24,uint32_t(3072-int(a.angle)));
+            if(!junction_footprint(&cpu,car,x,y,z,r))continue;
+            // Removing the neighbouring road makes this a real outside edge.
+            auto saved=roads;for(unsigned other=0;other<4;++other)if(other!=r)roads[other].count=0;
+            assert(!junction_footprint(&cpu,car,x,y,z,r));roads=std::move(saved);
+            ++junctions;break;
+        }
+    }
+    assert(junctions>0);std::cout<<"Verified "<<junctions<<" physical junction openings with outside-edge protection\n";
     assert(rage_free_world_switches()>=4);
     // Every actual road point remains covered by a correctly elevated road;
     // sharing a horizontal position with a bridge cannot select its underside.
@@ -130,5 +158,21 @@ int main(int argc,char** argv){
         }
         assert(shared>10);
     }
+    // Two adjacent road corridors form an open junction for a straddling
+    // hull. A missing road or a bridge at another height must not open it.
+    for(unsigned r=0;r<4;++r){auto& road=roads[r];road={};if(r>=2)continue;
+        road.count=16;road.length=1600;road.bytes.resize(4+24*16);put(road.bytes,0,16);
+        for(unsigned i=0;i<16;++i){const size_t p=4+24*i;put(road.bytes,p,i*100);put(road.bytes,p+4,r*200);
+            put(road.bytes,p+16,100,2);put(road.bytes,p+18,100,2);put(road.bytes,p+22,100,2);road.prefix.push_back(i*100);}}
+    current=0;ww(car,500);ww(car+8,95);ww(car+0x60,0);ww(car+0x24,0);ww(car+16,0);ww(car+24,0);
+    cpu.gpr[6]=limits;cpu.gpr[5]=9999;
+    assert(rage_free_world_dispatch(&cpu,0x31298)==0 && cpu.gpr[5]<16);
+    assert(cpu.gpr[6]!=limits && int16_t(rh(cpu.gpr[6]))<=3);
+    assert(rw(limits)==0xffc4003c && rw(cpu.gpr[6]+4)==0x00040003);
+    for(unsigned i=0;i<16;++i)put(roads[1].bytes,4+24*i+8,uint16_t(-1000),2);
+    cpu.gpr[6]=limits;assert(!junction_footprint(&cpu,car,500,0,95,0));
+    assert(rage_free_world_dispatch(&cpu,0x31298)==0 && cpu.gpr[6]==limits);
+    roads[1].count=0;cpu.gpr[6]=limits;
+    assert(rage_free_world_dispatch(&cpu,0x31298)==0 && cpu.gpr[6]==limits);
     std::cout<<"All four road networks remain drivable; switching and height separation passed\n";
 }

@@ -1,3 +1,24 @@
+# Release 0.3.25
+
+Fixes invisible collision barriers at Free run junctions.
+
+- Select the physical road and segment immediately before the collision check so the car can enter adjoining routes.
+- Allow the car to straddle a junction when all four collision corners are covered by adjoining road corridors at the same height.
+- Retain collision response at outside road edges and crossings at different heights.
+- Preserve the original road-height, banking and surface-response calculations.
+
+Includes the larger minimap, rotating opponent arrows and green leading-opponent marker from v0.3.24.
+
+### Windows download
+
+Extract `RageRacer-PC-v0.3.25.zip` into your game folder. Replace the supplied program files and retain your existing `data.dat`, saves, settings, music and mods. The data generator is unchanged.
+
+For a new installation, run `Generate Data.exe` with a supported original disc or image, then run `RageRacer.exe`. No original game data is included.
+
+### Validation
+
+All 17 native tests passed. Expanded collision tests cover stale route selection, adjoining-road junctions, outside-edge protection and bridge height separation. The Windows build completed successfully. An in-game check switched between all four road networks without manually changing their collision tables.
+
 # Release 0.3.24
 
 Updates the race minimap for clearer car positions and headings.
