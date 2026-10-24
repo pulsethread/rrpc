@@ -15,6 +15,17 @@ int main(){
     assert(rage_music_title_offset(21,1000)==1);
     assert(rage_music_title_offset(21,2000)==0);
     for(unsigned t=0;t<100000;++t)assert(rage_music_title_offset(160,t)<=140);
+    // A confirm on any early frame must still visit setup1/display15.
+    for(unsigned confirm=0;confirm<16;++confirm){unsigned timer=0;bool setup=false,display=false;
+        for(unsigned frame=0;frame<140 && timer<121;++frame){timer=rage_music_round_timer(timer,frame>=confirm);++timer;
+            setup|=timer==1;display|=timer==15;}
+        assert(timer>=121 && setup && display);
+    }
+    assert(rage_music_round_timer(120,false)==119);
+    assert(rage_music_round_timer(5,true,false)==5);
+    assert(rage_music_round_timer(15,true,false)==31);
+    assert(rage_music_round_timer(90,true,false)==31);
+    assert(rage_music_round_timer(32,true,true)==120);
     RageMusicConfirmation gate;
     assert(!gate.update(true));assert(!gate.update(true));
     assert(!gate.update(false));assert(gate.update(true));assert(gate.update(false));

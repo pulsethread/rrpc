@@ -872,38 +872,698 @@ Port/data/release-backups/20261023-retained-terrain. Installed main/Updated
 executables match; game archive, user cards/settings unchanged; bundle verify
 exit0. No GitHub publication was requested in this turn.
 
-### Multiplayer menu foundation — 23 October 2026
+### Multiplayer menus and independent car selection � 23 October 2026
 
-Installed main and Updated executable SHA256
-6882bcdf52f4e4d5a908091086d9820440cf9a04c2069d3b3394437fbeb903f8.
-The title menu now has Multiplayer immediately below Free run. Both extra-GP
-locked and unlocked layouts fit within 240 lines. Its native 112x16 indexed
-label uses the original title-menu glyph pixels and grey/red palettes, without
-a system font or resized glyphs. The retail menu provides pre-rendered words,
-not a complete font file: missing U and Y were reconstructed from O bowl/stems
-and X arms/I stem respectively. The added atlas row ends at v239, preserving
-the v240..255 copyright strip, original rows, logo, Press Start and TM.
+The title menu places Multiplayer below Free run. Its indexed label uses the
+retail menu artwork; missing U/Y glyphs were reconstructed from existing letter
+strokes. Reserved atlas rows preserve the original copyright, logo and menu.
 
-Multiplayer enters the shared solo/showroom layout directly. Three blank row
-plates keep their original animation/highlight. Car names, count, specifications,
-graph, browsing arrows, gear and captions are suppressed only in this mode.
-Confirm is inert; left/right cannot change the player's car. Cancel returns
-to the title through the existing solo-screen exit path. No network/session
-logic or multiplayer racing is claimed by this UI foundation.
+Mode selection reuses the original Time Attack course-menu layout and animated
+chrome. Course name/length, the diorama and car statistics are hidden. Start,
+Options and Exit have black left-aligned lettering; the mode caption is solid
+white. Left/right slides between two light-grey PS1 digital controllers and an
+extruded Wi-Fi mesh over 22 animation ticks with smoothstep easing. Stock browse
+arrows flank the models. Exit/Cancel returns to title; Online Start and the
+in-game Options row remain placeholders. The Windows Options > Controllers
+entry opens the controller setup panel.
 
-Two independently posed, shaded 3D original PlayStation digital controllers replace the
-car. The light-grey compiled procedural mesh includes compact bevelled shells/grips, directional
-keys, coloured face symbols, shoulders, Select/Start buttons
-and cables. Geometry is transformed/projected and submitted as opaque triangles
-through the live scratch ordering-table pointer, with one submission per menu
-animation tick. No flat controller image, original game-data edit or downloaded
-model is required. A stable shell/control/icon layer order avoids concave-shell
-mean-depth triangles covering raised controls in the original painter renderer.
+Split screen > Start opens two Pick car panels. Each physical/logical SIO port
+controls only its own preview and confirmation. All 32 retail CAR_*.1ST variants
+are selectable, independent of GP unlocks, ownership, class or garage progress.
+The close-detail body, shell, axle and wheel models and textures are read from
+the user's mounted verified disc archive. Two independent texture uploads occupy
+VRAM x704..767 and x768..831, y0..255; only car texture pages/CLUTs are relocated.
+The stock menu/font atlases remain available. Previews fit within their panels,
+rotate, and use a foreground OT layer so the original left panel cannot cover
+Player 1's car. Ready locks only that player's choice; Cancel unlocks it, or
+returns Player 1 to mode selection. Multiplayer choices never write the GP car
+or garage. This stage does not start a split-screen race.
 
-All 18 native contracts passed, including menu navigation/placeholder guards,
-atlas bounds and model topology/projection/packet ownership for PAL, JP and US.
-Live navigation verified the new entry, blank buttons, unchanged car selection
-and Cancel-to-title. The 162-check driver probe passed, with zero errors in
-300 retained GL events. Screenshots and glyph provenance are under
-Port/data/multiplayer-development; installation.json records backups and hashes.
-User archive/cards/settings remain unchanged; installed bundle verify exited 0.
+The runtime and prepared portable config now allow two controller ports.
+Options > Controllers provides a player dropdown, device assignment, a drawn
+PS1 digital pad and individual gamepad mappings. Each seat has an independent
+runtime mapping; controllers.ini in the save/settings folder persists devices
+and mappings with atomic replacement. Existing keyboard controls remain in use
+for a keyboard-assigned seat. One keyboard cannot be assigned to both players.
+The runtime's existing controller-claim logic keeps a physical pad exclusive.
+
+Graphics no longer forces 2x when host 3D or PGXP is enabled. A running context
+can manually step down to 1x through the retained-resolution API, preserving
+VRAM. Higher levels within its allocation can be restored; levels exceeding
+the allocated ceiling retain the existing next-launch behaviour.
+
+Validation: all 20 native contracts passed, including independent car choices,
+wraparound through all 32 variants, per-player confirmation and cancellation,
+all 32 close-detail asset decodes, malformed/truncated asset rejection, menu
+hooks for three regions, caption palettes and carousel packet ownership. Live
+checks exercised both injected ports, independent remapping/persistence in the
+native Controllers panel, actual effective 1x rendering, unchanged GP car,
+Cancel-to-mode, Exit-to-title and the 162-check graphics probe. Physical gamepad
+hardware was not exercised in this run. Diagnostics and screenshots are in
+Port/data/split-screen-development; installation.json records backups/hashes.
+
+### Preview wheels, black picker and artwork export � 23 October 2026
+
+Front wheel translations now multiply the serialized world-space offset by four,
+matching SetGteObjectMatrix's translation conversion into mesh units. The original
+preview placed them inside the body. All 32 variants have regression checks for
+both front-wheel centres and complete wheel geometry. A foreground black canvas
+covers the stock course-screen decoration only while the two-player picker is
+active; mode selection retains its Time Attack design.
+
+The native picker previously discarded fractional screen coordinates when building
+GP0 packets. Its vertices now retain exact 16.16 positions and homogeneous depth
+through an address/value-validated host PGXP producer. It neither mutates GTE
+registers nor enables the ambiguous position-cache fallback. Tests cover valid
+fractions, depth, invalid addresses, mismatches, NaNs, suppression and invalidation.
+All 21 native tests and live two-port selection/setup/exit checks pass.
+
+The original Time Attack screen was captured with its texture memory and draw
+packets. Menu Graphics/Time Attack contains 23 RGBA sprite fragments, 11 decoded
+texture atlases, an element index, reference screenshot and placement manifest;
+Time Attack PNG Export.zip contains the complete editing pack. Grid/shading and
+animation effects are renderer-generated; the PNGs preserve original source art.
+
+Wobble investigation: the new picker had a confirmed whole-pixel projection step,
+now corrected. The original showroom trace has dataflow precision enabled, position
+fallback disabled and preserved projection enabled; its sampled mesh vertices carry
+fractional coordinates. Source car poses still originate in fixed-point GTE
+matrices and integer translations. These findings do not establish the cause of
+the reported in-game wobble. Existing older race checkpoints reject the current
+runtime identity, so their staged load acknowledgements were not treated as valid
+race results. No speculative engine-wide transform change was made. Diagnostics
+are under Port/data/car-wobble. The user has clarified that individual panels
+and edges bend, rather than the entire car shaking. The homogeneous projection
+and retained mesh path were reviewed: mesh-local vertices are preserved and the
+GPU applies a shared affine pose, so fractional showroom coordinates alone do
+not establish that every reported deformation has been eliminated. A fresh race
+probe reached race state and collected native geometry counters, but its race
+presentation screenshot did not complete; it is not visual proof of a fix.
+
+### Supplied menu PNGs - 23 October 2026
+
+The seven requested PNGs are retained in assets/menu-options and embedded as a
+4-bit luminance-mask atlas. Every palette entry has the blend bit, including
+zero intensity. Dark labels use retail subtractive blending (ABR 2); white
+captions use additive blending (ABR 1). Black source pixels leave the destination
+unchanged and intermediate intensities blend the soft edges into the live menu. Multiplayer uses the supplied mode select,
+options, exit, Splitscreen, Online play and vertical MULTI images. Free run replaces
+the retail race-start sprite at its scripted position, retaining the slide motion.
+The atlas is checked and restored after menu texture uploads; the two car atlases
+and user game data remain separate. Live captures are in Port/data/menu-options-art.
+
+
+Multiplayer carousel placement now centres around logical x=200 within the grey
+gradient. The mode captions and arrows move with it (arrow x=124/264), and the
+slide clipping bounds move to x=124..278 to retain the button clearance.
+
+
+Multiplayer mode and both car-picker arrow pairs now have the retail green
+background pulse (sine phase step 0x60, byte-wrapped intensity 127..255).
+The cable and strain relief move to the rear shell and rear draw layer so the
+wire cannot paint over the face. Live mode/Online/picker checks and all 21 native
+tests pass. The geometry test also checks all cable faces stay behind the shell.
+
+
+Title menu refresh: replaced Free Run and Multiplayer normal/selected artwork
+with the four updated Menu Button Exports PNGs, retained under assets/menu.
+Multiplayer now has two independent indexed rows; its selected row uses the
+reserved u112..223/v176..191 area after Press Start and before Free Run.
+The retail palettes and title-menu opening/highlight animations are preserved.
+The title-menu regression verifies all four reserved rows across PAL/JP/US.
+
+
+Free-run barriers and pre-race logo: closure filtering uses all four authored
+road networks, including arc centres and lane widths, instead of a centre-only
+chord corridor. It handles diagonal fork panels while preserving parallel outside
+rails, road decks, tall supports and overhead structures. Class-1 fixture geometry
+now has 31455 faces / 45410 triangles (previously 31792 / 45858). Tests cover
+angled side-of-lane closures, a curved-road gate, outside rails, overhead boards,
+64 authored structure samples and six physical junction openings.
+
+The pre-race routine runs again for Free Run, preserving the top Rage Racer logo
+and its fades; only its Time Attack sprite and course/timing text submissions are
+filtered. DrawSprite/DrawText call sites are mapped for PAL, JP and US; the JP
+pre-race entry is corrected to 0x8001c7e0 from the preceding function's return.
+All 21 native tests pass.
+
+
+Barrier material correction: the supplied junction screenshot distinguishes the
+red/white closure tile (TPAGE 0x15, U160..191/V96..111) from the black/yellow
+divider tiles (U64..95/V96..127). Free Run removes the closure tile independent
+of shape and explicitly retains the divider tile before geometric heuristics.
+Both the active mesh and every donor use this rule; racing-mode Oval merging
+keeps its existing policy. The regression requires no closure tile in the rebuilt
+world and checks original chevron triangle samples remain covered. Texture crops
+and track-data diagnostics are under Port/data/barrier-materials.
+
+
+### Closure assemblies and intact side barriers - 24 October 2026
+
+Free Run now omits only identified red/white closure boards and their nearby
+metal supports. The former generic road-crossing wall filter is no longer used
+for Free Run; ordinary Oval/racing reconstruction keeps its existing policy.
+Supports must use the matching metal tile, fit the narrow pole dimensions and
+intersect a closure board's height and attachment neighbourhood in aligned world
+space. Unrelated poles and all other wall materials remain. Class-1 regression
+checks remove 28 active-course support faces, retain 40 chevron surface samples
+and restore 60 samples of walls formerly removed by geometry heuristics. The
+rebuilt fixture has 31747 faces and 45811 triangles. These are asset-level checks;
+the exact player screenshot location has not been reproduced in a live drive.
+
+
+### Complete junction closures - 24 October 2026
+
+The church/Oval junction also contains silver horizontal rail sections separate
+from the red/white boards. Identify that rail tile, then remove it only where
+authored, equally elevated road pavement covers samples on both sides. Road
+coverage uses the original line/arc contacts; exterior rails fail the outward
+sample. Narrow metal supports are matched against the full edges of cleared
+boards and rails, rather than just their corners. No generic wall deletion is
+reintroduced. Class-1 checks remove 20 road-closing rail faces and 136 attached
+support faces, preserve all 40 chevron samples, and verify no classified closure
+rail/support remains in the rebuilt world. All 21 tests pass.
+
+Live QA reached the church junction and viewed the flat Oval entrance and the
+uphill divider separately: Port/data/closure-live/entrance/junction.png shows the
+open entrance, and fixed/junction-verified.png shows the intact uphill divider.
+Debug write_ram accepts a bounded, validated hex RAM block for coherent diagnostic
+pose placement; the original one-byte val form is retained. This does not alter
+the normal game flow.
+
+
+### Tunnel closures and partial junction contact - 24 October 2026
+
+Free Run removes the authored tunnel blackout/rim tile (TPAGE 0x16,
+U64..95/V16..47) from active and donor meshes. Other tunnel walls, ceilings
+and yellow/black dividers remain. A live tunnel-mouth capture confirms the
+opaque cap is absent: Port/data/tunnel-caps-collision/live/opposite.png.
+
+Junction collision now checks each rotated hull corner against the union of
+same-elevation authored roads. Corners supported by a connecting route no
+longer constrain the selected road edge; unsupported corners retain exterior
+wall contact. This fixes the previous whole-hull requirement that left partial
+invisible collisions while entering a branch. Regression covers a car straddling
+an open connection and an unsupported outer edge. All 21 tests pass; the Release
+build succeeds. Live cap visibility was checked; a complete driving sweep of
+all junctions has not been performed.
+
+### Free Run drive sweep, local tunnel approaches and TV - 24 October 2026
+
+Completed eight input-driven laps: BIG, MID, HI and Oval in each direction,
+changing networks between laps and turning the car around for the reverse
+passes. Later passes included gentle lane weaving. No car-position RAM writes
+were used during the eight-lap sweep. Debug turbo accelerated parts of the
+sweep; paced presentation was restored for its screenshots. Summed driving
+wall time was 1882.5 seconds. Isolated saves and dummy audio were used. Records:
+Port/data/free-run-drive/eight-laps.json and live/drive.jsonl. A separate pose
+replay was used only for focused before/after checks, not counted as laps.
+
+Confirmed HI first tunnel exit pop-in at point 46: baseline screenshot
+live/r2-d1-t0048.png shows sky beyond the tunnel instead of the approach road.
+The merged mesh contains that road, but its upper-section visibility flag was
+hidden by the current route-index gate. Nearby later-section sectors now remain
+available within 8192 horizontal / 2048 vertical world units of either camera
+endpoint. The distant authored backdrops retain their original concealment;
+revealing the entire upper world exposed inappropriate distant geometry and
+was rejected. GPU depth/frustum clipping still applies. Regression covers the
+actual approach face and a distant overhead backdrop. Final capture is under
+verified-release/tunnel-final.png.
+
+Collision write traces found unnecessary one-to-four-unit corrections at
+HI (22056,5126,23012), stadium (49958,6000,11760), and MID
+(39929,2549,40733), despite full same-height pavement support at every hull
+corner. A fully supported hull now bypasses only the single-ring edge clamp
+for that contact call. Height, pitch, banking and surface response still run;
+an unsupported corner restores normal boundary contact. Partial junction
+limits also publish the correct retained corner contact IDs. Identical short
+pose/input A/B replays reproduce old corrections at all three positions and
+none in the final build: collision-recheck-final.json. A separate unsupported
+outside-wall control still applies a 169-unit correction. Geometry/height
+sampling of the eight driven laps found no sampled ground mismatch over 96
+world units; this is not exhaustive coverage of every driving line.
+
+The canopy TV uses its original models 24..39 and four-tick normal loop in
+Free Run, with message model 7 bound to the supplied native 112x32 freerun.png.
+All five supplied colours match the original message palette exactly: packing
+is four-bit with no resampling. Retail palette cycling is retained. The Grand
+Prix draw guard is borrowed only within the screen routine and restored before
+model submission or on early exit; no race mode is permanently changed. The
+original message pixels are restored when Free Run racing ends. Regional tests
+cover PAL/JP/US guard restoration, adjacent halfword preservation, early exits,
+model selection and pixel restoration. Live TV capture: verified-release/tv-final.png.
+Source asset: Src/assets/tv/freerun.png; packed image: rage_free_run_tv_art.h.
+
+Original TV art is exported under TV Animation Export/Original Pixels, including
+18 unique native-size texture crops and original model positions/sequences.
+The initial enlarged composites were moved to Enlarged Reference Previews and
+are explicitly marked as previews. They are not native-size originals.
+
+Final Release build and all 21 tests pass. Eight laps were baseline diagnostic
+coverage; final validation consists of the focused A/B collision, outside-wall,
+HI tunnel visibility and TV checks plus the regression suite, not eight more
+full laps of the changed build. No GitHub release was requested this turn.
+
+### Tunnel-only speedometer lighting - 24 October 2026
+
+DrawPlayerTachometer originally selected dark/fade modes using both zoneDark
+and g_EnvScriptClock. Free Run route/progress changes move that original clock,
+so the dial could switch outdoors. The DrawTachometer entry now selects mode 2
+only when the player's physical position passes the existing sustained-tunnel
+and direct-roof checks, otherwise mode 0; blend amount is zero. This applies to
+active races in all driving modes and leaves non-race presentation untouched.
+The stable rendered-height field is used, rather than contact scratch height.
+PAL/JP/US argument regressions cover all four incoming lighting modes, both
+tunnel states, unchanged RPM/shift-light values and non-race preservation.
+Live outside/tunnel/outside captures under Port/data/speedo-tunnel/live confirm
+normal / illuminated dark / normal appearance. Release build and 21 tests pass.
+
+
+### Free Run held-jump trap - 24 October 2026
+
+Higher-speed, wider-line driving reproduced an actual below-road/stuck car on
+OVAL5, not missing render geometry. At raw (55442,5822,1403), speed 899, the
+player entered vertical state 2 and retained launch Y=5820. The bank then rose
+to Y=5667 at (55708,4240): the physical car was 153 game units beneath its
+correctly computed road contact. It eventually stopped while still in state 2.
+Telemetry and captures: Port/data/free-run-ground/live; diagnosis.json records
+the launch and deepest sample. Position logs use modelY as the stable floor;
+the primary Y word can contain contact work during a debug read.
+
+GetCarCrestTrigger still read the starting circuit's event table while Free Run
+rescaled progress across BIG/MID/HI/OVAL. Its negative event at progress 56071
+holds the car at its launch height until the authored course drops away.
+Crossing it on an unrelated bank can instead put the car below pavement and
+leave the airborne drivetrain unable to accelerate. The higher-speed threshold
+explains why earlier low-speed laps did not reproduce it. A different line in
+a repeat baseline lap crossed the same event and landed normally, confirming
+that merely crossing the point is insufficient to reproduce the trap.
+
+For the Free Run player only, GetCarCrestTrigger now returns no scripted launch.
+These start-course scripted hops have no valid coordinates in the combined
+world; normal road contact, banking, outside walls and airborne/landing routines
+remain intact. Grand Prix, other cars and non-race scenes retain retail lookup.
+No road meshes or floor heights were changed for this fix. Entry points were
+verified against all three generated 252-byte functions: PAL 39184, JP 38B6C,
+US 38EF0. Regression covers regional mapping and mode/player/scene scope. Release
+build and all 21 tests pass. Driving coverage is recorded separately in
+Port/data/free-run-ground/candidate/wide-summary.json and drive.jsonl.
+
+The fixed build then completed eight full input-driven laps, all four networks
+in both directions, weaving toward both sides (target amplitude 80% of local
+half-width) with a target speed cap of 1150. All eight completed, 10,031 position
+samples recorded, no held-jump launches, no sustained below-road/stuck failures.
+One isolated debug read showed physical Y=4128 and old modelY=4104; the actual
+HI surface at (17076,24071) is Y=4128.91, so this was a read between contact and
+model-height copy, not penetration. Two large per-sample floor changes were on
+the authored steep hill; their rise/run was continuous across adjacent samples.
+These are the tested driving lines, not exhaustive coverage of every possible
+position. Final summary/review: free-run-ground/validation.json. Three installed
+launchers share SHA256 4C2F468E95B7009B2367AFCDF56F43DAE28119309601A5CFB6A53C5C9230A04A.
+Installation receipt confirms game data, settings and memory cards unchanged;
+old executables are backed up. Diagnostic games used isolated saves and have
+been stopped. No GitHub release was requested for this change.
+
+
+### Sky-driven lighting and local environment shadows - 24 October 2026
+
+Ported RenderDirectionalLightFromSky from the reference render_world.c into
+rage_environment_light.h. The displayed top/horizon palette determines the
+ambient hue, directional colour and elevation; azimuth remains world-fixed.
+The packed environment ABI is respected (slots begin two bytes into the block,
+12 bytes per slot). Top/horizon byte loads were checked in generated PAL, JP
+and US sky functions: block bases 801E3FB4 / 801E3744 / 801E3CBC. A race-only,
+immutable tick snapshot interpolates the bands for generated frames; the GPU
+never reads guest memory. Menus and sky/HUD rendering retain their own shading.
+
+The existing 4096-square texel-snapped shadow map now shares the sky-derived
+sun direction. Track, cars, scenery and road decals receive the lighting and
+shadows; original vehicle shadow plates remain replaced when native shadows
+are available. Local lamps and emissive lenses remain additive. The modulation
+is blended with the authored texture/vertex shading to retain the original art.
+
+Nearby opaque/masked terrain is separately submitted to the light frustum,
+including geometry behind the viewing camera. It uses the retained terrain
+identities and exact same resident payloads as the colour pass. Shadow-only
+receipts are excluded from colour/depth rendering, and dropped safely if the
+retained path is unavailable. Original Free Run later-layer concealment still
+applies. Decals, sky and translucent texels do not become opaque casters. Wall
+winding and scenery appearance dithering do not change light occlusion. A
+padding margin covers camera/player anchoring and interpolation. A soft map
+edge fade avoids a moving hard rectangle at the local shadow-volume boundary.
+
+Resident GPU copies gather compatible environment ranges into a few light
+draws rather than one draw per sector. Main/mirror transforms and colour draw
+ordering stay independent; original scene-depth initialization happens before
+light receipts are queued, so its clear cannot drain the new shadow map early.
+The 16384-vertex-unit extent and 4096 resolution reuse the existing allocation;
+this is bounded local raster shadow mapping, not a global-illumination/ray
+tracing port. Debug controls RAGE_SKY_LIGHTING=0 and RAGE_ENVIRONMENT_SHADOWS=0
+allow comparisons. Existing RAGE_VEHICLE_SHADOWS remains the master map toggle.
+frame_gen now reports environment map/caster/lit-group counters separately.
+
+Validation: all 21 contract tests pass, including sky hue/elevation, valid night
+ambient, dynamic light map projection, off-camera caster inclusion and distant
+caster rejection. The actual-driver material probe adds environment depth,
+transparent cutouts, warm/cool fragment tint, and map-edge fade controls (168
+samples). Driving/visual diagnostics and profiles are under
+Port/data/sky-lighting. Two Free Run laps covered BIG in both directions; one
+Grand Prix lap covered the normal course with rivals active. These broad runs
+preceded the last batching/decal/edge-fade refinements; subsequent fixed-pose
+checks and final GPU/rival checks validate the final renderer separately.
+
+Three equal-palette, isolated-process comparisons used stadium, climb and
+waterfront chase views at 2x. Before the final inexpensive edge-fade expression,
+median real-frame CPU overhead was 0.84--1.24 ms, generated GPU overhead
+0.89--1.33 ms; generated CPU time was essentially unchanged (-0.049 to +0.023
+ms). No frame-generation performance cutoffs occurred in those samples. These
+are local measurements, not an all-hardware frame-rate guarantee. Detailed
+before/after medians and p95 values are saved in baseline/profile.json,
+final/profile.json and performance-comparison.json. Existing Free Run distant
+upper-backdrop artefacts are visible in both comparison captures and were not
+created or modified by this lighting change. Collision/road data is untouched.
+
+The final edge-fade build passed all 168 actual-driver probe samples. A focused
+Grand Prix check with a player pose staged near an active rival recorded 565
+vehicle caster draws, 122 environment caster draws and 1519 lit groups over 49
+real / 71 generated frames, with no additional performance cutoffs. This was a
+rendering control, separate from the earlier naturally input-driven GP lap.
+Final executable SHA256: 2F1E12F3E9A118A1F4890814F6C481787B896D26F243A9FE0852E78402099DAB.
+All three launchers match this tested binary; installation.json verifies game
+data, graphics/controller settings and both memory cards were unchanged. Old
+launchers are backed up and own diagnostic processes are stopped. No GitHub
+push or release was requested for this renderer change.
+
+
+### 2026-10-24 — sky lighting UI isolation, brightness and stability
+
+- Preserve RAGE_SCENE_UI through the generic vertex key (bit32) into native
+  attributes (bit32768). UI fragments return their authored colour before any
+  directional lighting, shadow attenuation, headlights or lens emission, and
+  are discarded from shadow depth rendering. Road decals remain world lit.
+- Increase sky-derived ambient from .18+.20*day to .26+.30*day and direct
+  intensity from .52+.34*day to .65+.45*day, retaining horizon tint and elevation.
+- Compute surface-normal derivatives from camera-relative world positions,
+  before adding the distant world translation. Always anchor the shadow grid
+  to the camera instead of switching between camera and player by queue
+  contents; apply slope-scaled polygon offset (2,4) during shadow depth only.
+  These address precision noise, inconsistent grid placement and self-shadow
+  acne. No claim that every possible reported building has been reproduced.
+- Validation: all 21 CTest targets passed; UI packing test subsequently added
+  and native_geometry_contract passed again. Actual-driver material probe:
+  168 reported samples, zero failures, including additional warm/cool UI colour
+  invariance checks. Three live scene profiles had zero performance cutoffs.
+  Actual controller-driven Free Run route0 reverse lap completed in 71s.
+  Twelve stationary stadium captures: centre/right building regions were
+  pixel-identical; left region maximum channel spread6 with no pixels >8.
+  Captures, profiles, lap log and installation receipt are in
+  Port/data/sky-lighting/brightness-fix/.
+- Installed all three Shareable launchers with SHA256
+  F42CBABCAD1B794CEF678688BB1CA670BA267557F2602EAD188FCB658DC22991.
+  User data.dat, settings and memory-card hashes verified unchanged; previous
+  launchers backed up as recorded in install-before.json. QA process stopped.
+
+
+### 2026-10-24 — quick pre-race confirmation and configurable distant shadows
+
+- Reproduced quick Free Run confirmation with real pad input: scene12 kept
+  updating/drawing with GPU display disabled (gpu_state.disabled=1), so audio
+  continued but no presented screenshot completed. The music hook accelerated
+  the ROUND timer to120 before stock setup1/display-enable15 could execute.
+  rage_music_round_timer now preserves those setup events before fast-forward.
+  Early confirmation remains latched. Regression checks every confirm frame0..15.
+- Start and the mapped accelerator both confirm songs. Schedule the existing
+  ROUND cue call at32 once, substitute the standard menu confirmation cue2,
+  then permit fast-forward. Guest stack/calls/audio bank remain stock. Verified
+  PAL live function traces show exactly one cue2 from ROUND return8001D03C
+  for Start and accelerator, and display enabled on both quick-start runs.
+  Cue entry/return mappings verified against PAL/JP/US generated sources.
+- Add persisted Graphics > Use sky as a light source (sky_light). Off disables
+  the added directional tint and real-time shadow passes, retaining authored
+  colours, original car shadow fallback and existing car lamps. Restore original
+  settings also switches sky lighting off. Existing preferences default on.
+- Add persisted Graphics > Shadow quality: Off/Low/Medium/High
+  (shadow_quality=0..3, defaultMedium). Live menu choices use no restart.
+  Low2048, Medium4096, High8192 depth maps, clamped to GL_MAX_TEXTURE_SIZE.
+  High uses four bilinear comparison footprints (16 depth comparisons per
+  cascade) for smoother moving edges; other levels use four comparisons.
+  Recreate depth targets when quality changes; qualityOff disables all native
+  shadow casting/receiving while leaving the sky's colour lighting available.
+- Add a distant cascade spanning1.5*the current geometry far limit, alongside
+  the detailed16384-unit near cascade. Blend overlapping grids and scale far
+  receiver bias in world units. Geometry selection uses the distant light
+  volume independently of viewing direction; standard131072 and extended196608
+  draw distances are covered, including reverse views. Texel snapping uses
+  the selected map resolution. Actual-driver regression verifies an occluder
+  still shadows a receiver outside the near map, including the high filter.
+- Shadow caster expansion exposed cache/queue pressure:512 mesh entries and
+  a retained-terrain1024-record flush could split the caster list. Raise mesh
+  entries2048, retained lookup8192, scene queue4096 consistently, retaining
+  the32MiB source payload limit. This avoids incomplete shadow-list rebuilding
+  in the examined views and reduces repeated retained geometry rebuilds.
+- Validation:21 CTest targets passed, including timer setup and map-range/
+  resolution regressions. Production GPU material probe reports168 samples,
+  zero failures, including additional far/high/UI cases. Full controller-driven
+  Free Run route0 reverse lap completed with the two-cascade renderer. Three
+  High scene profiles show no performance cutoffs. Building-edge shimmer is
+  not claimed eliminated in every scene; source fixes address partial lists
+  and High adds resolution/filtering. Diagnostics are in
+  Port/data/free-run-transition/, including live menu/INI checks, sound traces,
+  screenshots, scene profiles and controller lap logs.
+
+Final quality installation: all three launchers SHA256 DAD09C3002A702965381EA223B76C6A273523E7A96DD08572F5398832879ED78.
+Live Win32 submenu checks verified Off/Low/Medium/High labels, checkmarks,
+saved values and immediate shadow-pass changes. GPU probe passed after each
+choice. User data/settings/cards hashes unchanged; backup path and receipts
+in Port/data/free-run-transition/quality-installation.json.
+
+
+### 2026-10-24 — reproduced dome/finish shadow artifacts
+
+- Reproduced against installed DAD09C3002A702965381EA223B76C6A273523E7A96DD08572F5398832879ED78
+  with two independent game instances, matching car/camera poses near the finish.
+  The glass dome showed a large dark outer patch; repeated frames also caught
+  the finish banner changing between normal and heavily shadowed texture states.
+- Remove automatic promotion of arbitrary non-terrain 3D groups into scenery
+  shadow casters. A shared viewport does not prove a world transform. World
+  lighting now requires terrain or explicit vehicle tags; camera-space effects
+  also bypass local light spill/lens emissions. Translucent terrain groups
+  neither cast opaque environmental shadows nor receive projected shadows.
+- Correct receiver bias: far-map tolerance was scaled down by near/far extent,
+  holding it to a few world units despite much larger far-map texels. Both maps
+  now use4096/actual_resolution bias scaling in their own depth coordinates.
+  Actual GPU control reproduces false occlusion at the former small bias and
+  verifies the corrected tolerance while retaining true distant occlusion.
+- Conservative receiving policy: opaque scenery faces with abs(normal.y)>.55
+  (roads, banks, ground and similar surfaces) and all vehicle panels receive
+  projected shadows. Upright texture artwork/walls retain authored shadow
+  detail and sky colour lighting. This intentionally forgoes dynamic projected
+  wall shadows to avoid unstable self-overlap in these two-sided retail meshes.
+  Opaque scenery still casts onto roads/cars. Dome glass uses its original
+  translucent presentation, without opaque self-shadowing.
+- Validation:21 CTest targets passed, including new world/receiver classification
+  checks. GPU probes passed after Off/Low/Medium/High live switches, including
+  upright-sheet, vehicle receiver, distant-occluder and old/new bias controls.
+  Matched16-frame captures: verified dome, finish banner and tower crops were
+  pixel-identical across all captures. The concurrent old build had respectively
+  11017,18976,652 pixels varying by more than8 channel levels. Source captures
+  and exact boxes/results are in Port/data/shadow-regression/verified-stability.json.
+  A genuine controller-driven Free Run route0 reverse lap completed on High.
+- Installed all three launchers SHA256
+  251E41F61E3E5F71D2066091385145DD067F95BE00DE4410679DAAA198E1D4B8.
+  Previous launchers backed up; data.dat, user graphics/controller preferences
+  and memory-card hashes unchanged. See shadow-regression/installation.json.
+
+
+### 2026-10-24 — preserve scene-frame shadow maps across queue flushes
+
+- Found a map lifetime bug: each native queue flush rebuilt/cleared both maps,
+  including terrain-only receiver flushes (the previous fallback selected a
+  terrain group even with no actual casters). Material updates/cache pressure
+  could split the caster list, replacing a complete map with an empty/partial
+  one later in the frame and briefly removing the shadows.
+- Remove the no-caster terrain fallback. Map lifetime follows the existing
+  scene-depth frame reset. The first actual caster batch clears/builds both
+  maps; subsequent caster batches append depth using the same near/far rows.
+  Receiver-only batches reuse the existing maps. Freeze sky-light uniforms to
+  that frame's map direction/colour, including batches without a sky receipt.
+  Quality changes still recreate/clear targets; sky/shadow Off still bypasses.
+- Add an explicit update-plan helper and CPU regression for caster/receiver/
+  later-caster sequencing. Actual GPU regression verifies that a receiver-only
+  flush preserves depth and a subsequent farther caster cannot erase the first.
+  frame_gen exposes shadow_frame_clears/appends/reuses for verification.
+- Diagnostic RAGE_NATIVE_QUEUE_LIMIT (128..4096, default4096) forces more queue
+  boundaries without changing shipped defaults or increasing memory limits.
+  Tested the same binary in normal4096 and stress128 configurations. Live
+  counters recorded11462 append and11114 receiver-only reuse operations in
+  the stress capture run, and210/5126 respectively in the normal run, proving
+  these paths occur even without artificial pressure.
+- Validation:21 CTest targets passed.40 consecutive captures per configuration
+  had pixel-identical road-shadow, finish-banner and dome crops (zero channel
+  variation); exact boxes/counters are in Port/data/shadow-lifetime/stability.json.
+  A controller-driven Free Run route0 reverse lap completed in61.41s on High.
+  Live Off/Low/Medium/High menu switches saved correctly and GPU probes passed
+  after each. Captures, lap log, probe/menu evidence and receipts are in
+  Port/data/shadow-lifetime/.
+- Installed all three launchers with SHA256
+  E1E7A840A4B646021160D825A45A6C34B492C29A6EA6B025DD2655840320F451.
+  Previous launchers backed up; data.dat, real user graphics/controller settings
+  and memory-card hashes unchanged. See shadow-lifetime/installation.json.
+
+
+## 2026-10-24: eliminate redundant retained terrain work
+
+- Keep the current OpenGL backend and all visual quality settings. The retained
+  terrain cache now uses four-way sets with LRU replacement (same 8192 entries),
+  avoiding direct-mapped collisions. Validate the actual referenced material
+  slot/key identities instead of invalidating all geometry on unrelated atlas
+  layout changes. Dirty texture pixels still refresh through material_acquire
+  with its existing ordered flushes; texture animation does not rebuild vertices.
+- Reuse the GPU terrain gather buffer only when the complete ordered immutable
+  allocation serial, buffer handle and vertex ranges match. Live transforms,
+  lights, fade and viewport continue to update normally. Changed layouts still
+  orphan/copy, errors invalidate reuse, release clears the cached layout.
+  Added frame_gen reuse/saved-byte counters and stream identity CPU regressions.
+- Matched three-scene scale2/High-shadow profiling eliminated warm terrain
+  rebuilds; intermediate-frame CPU medians improved 25-36%. Then repeated at
+  the actual saved scale6/120fps/16xAF/High-shadow settings, using isolated saves.
+  Stadium real CPU 3.840->2.988ms, climb 3.540->2.893ms; intermediate CPU
+  0.786->0.526 and 0.579->0.456ms. Waterfront first short run had worse real
+  CPU/GPU timings despite lower intermediate cost. A longer reverse-order
+  repeat measured CPU 3.816->3.616ms and intermediate CPU 1.116->0.662ms;
+  real GPU 6.673->7.031ms remained worse, intermediate GPU 2.867->2.182ms.
+  These are sampled costs, not an across-the-board FPS guarantee.
+- At saved settings, all warm terrain rebuild counts became zero; GPU copy
+  traffic fell about87-96% over comparable capture windows. Sky palettes and
+  staged before/after visuals match; no frame-generator breaker trips occurred.
+  Measurements/screenshots: Port/data/performance-pass/, including original
+  short runs and longer waterfront repeats. No quality settings reduced.
+- Validation:21/21 CTest targets passed; final-binary GPU material/shadow probe
+  passed168 samples, zero failures. GP startup and live counters exercised
+  vehicles, shadows and retained terrain. Controller-driven Free Run route0
+  reverse lap completed with the optimized candidate. Finish/dome captures
+  were inspected on final binary. This pass did not retest every driving route.
+- Installed all three Shareable launchers; SHA256
+  3416AE2662C2CF9C810946FD72E24909D04E798CEF286DAB3D249A8E2B001FEB.
+  Backed up previous launchers. Game archive, real graphics/controller settings
+  and both memory cards verified unchanged. Receipt:performance-pass/installation.json.
+
+
+## 2026-10-24: live rendering resolution selection
+
+- Replace the graphics menu startup-allocation ceiling restriction with a
+  synchronized manual scale request. Initialize resize resources even when
+  starting at1x; raise the manual ceiling on demand within the full-VRAM
+  GPU dimension/memory budget and current wide-surface limits. Resize occurs
+  through the existing ordered post-present path preserving VRAM/display pixels.
+  No maximum-size allocation at startup; no context/window/game restart.
+- Remove the restart-required menu label. Saved resolution still persists.
+  Automatic dynamic-resolution ceiling behavior remains separate. Dual-raster
+  and high-resolution-window regimes retain their existing resize restrictions.
+- Live test started at1x and selected2,4,8,1,6,3,1,8,2 through actual WM_COMMAND
+  menu dispatch. Each reported the matching real framebuffer size and passed
+  168 GPU probe samples with zero failures. Screenshots confirmed visual scale
+  changes. All six menu scales exercised without restarting the process.
+- VRAM preservation probe stepped1,2,3,4,6,8,1,8,2:zero hash mismatches, restored2x.
+  QA settings and cards were isolated; user preferences/archive/cards unchanged.
+  Installed all three launchers with SHA256 F52DB669BDD201B9AFAB17E0DBA86A58FB6099ACF185D8CC9813CA9EB842D5D0.
+  Evidence/backups receipt:Port/data/live-resolution/installation.json.
+
+
+## 2026-10-24: tunnel fixtures, shadow ambient and Free Run route ownership
+
+- Infer fixed tunnel fixture positions from bright yellow texels mapped through
+  authored UV triangles, restricted to small surfaces around sustained roofed
+  road sections. Deduplicate close samples and keep route ownership. Captured
+  player-light snapshots now carry up to16 nearby fixture positions, so the GPU
+  does not read mutable track state. Loaded Free Run union found640 samples;
+  GP course found76. These are inferred light patches, not separately authored
+  lamp objects. No asset modifications or per-fixture shadow maps were added.
+- Local warm lights attenuate by distance/orientation below each fixture, replace
+  sky-driven shading inside their influence, and preserve authored texture colour.
+  UI keeps its early lighting bypass. Sky lighting Off bypasses these additions.
+  Add .08 to sky ambient; directional shadows retain the full ambient term and
+  16% diffuse floor instead of darkening ambient to55% and diffuse to10%.
+- Tag combined-world faces with route ownership bits. Exact duplicate and
+  coplanar shared surfaces inherit donor ownership during union construction;
+  metadata-only merges are retained. Prepared batches split at route/layer
+  boundaries with individual bounds and stable identities. Both colour and
+  off-camera shadow submission use the same route/bounds filter. Shared/current
+  route geometry stays; nearby connectors from other routes remain available,
+  while distant/vertically separated alternate-route batches are hidden and
+  excluded from shadow submission. Legacy colour path uses the same policy.
+- CPU regression validates all four exclusive ownership sets and shared surfaces
+  (2699/9626/8848/3964 exclusive,6220 shared), connector visibility and stacked
+  route rejection.21/21 CTest targets passed. Final GPU material/shadow probe
+  passed in Free Run and GP, including updated ambient expectation and a new
+  warm/local/below-fixture test. Existing UI, mirror and shadow lifetime tests pass.
+- Controller-driven route0 reverse and route1 forward laps completed. Staged
+  captures also cover route2, both route0 tunnels and a GP tunnel. Not every
+  route/direction was driven in this pass. At scale6/120fps/High/16xAF, a short
+  tunnel sample had median realCPU2.170ms, realGPU7.787ms, genCPU2.285ms,
+  genGPU1.941ms, zero breaker trips. This is a spot check, not a full benchmark.
+- Installed all three launchers, SHA256 53ED829B083B1BCB5CD6ACE18D166EF3F8A0F90017C7B7B3DE21B1210B63AA19.
+  Archive, real settings/controllers and both memory-card hashes unchanged.
+  Captures, driving logs, GPU probes and installation receipt:
+  Port/data/tunnel-route-lighting/. Previous launchers backed up.
+
+
+## 2026-10-24: Extreme Oval route-filter exemption
+
+- Route bit3 (Extreme Oval), including shared faces, bypasses route and upper/
+  lower-section hiding in the common colour/shadow visibility helper. Normal
+  frustum and draw distance still apply; other routes retain filtering.
+- Exclusive/shared Oval regression with distant vertically separated bounds
+  passed in free_world_geometry_and_routes; release build succeeded.
+- Installed: RageRacer-Updated.exe, RageRacer-MultiplayerTest.exe. Running/locked: RageRacer.exe.
+  Also staged RageRacer-OvalUpdate.exe. SHA256 AD51FB4BEC886FFB45F13991B27CDC7DBB5634262A141C2333BFC11AE9E5D8B9.
+  Protected data/settings/cards unchanged; receipt:Port/data/oval-filter-exemption/installation.json.
+
+
+## 2026-10-24: tunnel route windows, original tunnel shading, fast Free Run entry, stats
+
+- Replace proximity-driven alternate-route appearance with two authored tunnel
+  portal windows per main route. Both travel directions use the same intervals;
+  one road segment of portal overlap covers the camera/car crossing. All three
+  main routes open inside either window; outside, only chosen/shared geometry
+  survives the common colour/shadow filter. Extreme Oval remains always exempt.
+  The combined world/CPU-prepared geometry stays resident rather than reloading
+  from disc per branch. Ordinary frustum and draw-distance clipping still apply.
+- Remove the yellow-fixture extractor, immutable fixture snapshots, GPU uniforms,
+  local warm lighting shader and fixture GPU probe. Tunnels retain the original
+  authored textures and existing car lamps. Outdoor ambient improvement remains.
+- On Free Run scene12, suppress the old ROUND artwork (finish its fade level)
+  while retaining the stock game fullscreen fade. Begin that fade immediately
+  rather than spending its first six frames fully black. Keep ROUND setup1,
+  display15, asset readiness, song confirmation and the existing chime intact.
+- After a confirmed Free Run song/chime, use the existing turbo-through-loads
+  path in scenes10/11 only, without changing user speed preferences. A120ms
+  chime lead-in preserves feedback; accelerated output uses the existing audio
+  sink, and normal pacing resumes on scene12. Required asset/mesh initialization
+  still takes time. Matched diagnostic traces from first observed ROUND to race:
+  9.80s before loader acceleration,6.44s final. This is not an instant-load claim.
+- Graphics > Display stats toggles immediately and persists display_stats in
+  graphics-options.ini (defaultOff). White top-right host OSD on translucent
+  background; unaffected by world lighting/internal resolution. FPS counts actual
+  swaps, including generated frames. Frame time is the sampled mean presented
+  interval. Cache is the native mesh source cache, currentMiB/32MiB budget, via
+  an atomic occupancy receipt (not cumulative uploads). CPU is game process
+  usage normalized over host logical processors. GPU uses Windows PDH's busiest
+  game3D engine, N/A when unavailable. Poll/rasterize at2Hz; disabled has no
+  polling or drawing. Separate OSD texture avoids reallocating the minimap texture
+  every frame. No new external runtime dependency; PDH/GDI are Windows libraries.
+- Validation:21/21 CTest targets pass, including all three regional Free Run fade
+  regressions and all three routes/both tunnel windows in both directions. Actual
+  controller passes crossed the first tunnel forwards (point36->138) and last
+  backwards (190->127), with no below-road failure. Final GPU probe168 samples,
+  zero failures. Live stats toggle/persistence and1x/6x/2x switches passed; actual
+  CPU/GPU values and final OSD visually verified. Menu/game captures, transition
+  traces and driving logs are in Port/data/portal-stats/.
+- Installed launchers: RageRacer.exe, RageRacer-Updated.exe, RageRacer-MultiplayerTest.exe, RageRacer-OvalUpdate.exe. Running/locked: .
+  SHA256 C6D0339D4A24C8AF53D0398B37DBB35D219C28BFBD31882E8E27D964BC16D7EA.
+  Real archive/settings/controller/card hashes unchanged; prior executables
+  backed up. Receipt:Port/data/portal-stats/installation.json.
+
+## 24 October: draw distance, route crests and race fade
+
+Normal terrain/environment depth is 106496 (original81920, previous131072); extended depth139264. Shadow extent shares the terrain limit. Route-local chunk9 crest events restore positive hops and negative crest holds in both directions without applying the starting route's events to another road. All28 actual-disc authored events pass. The original race draw and fullscreen fade run normally, with only hidden race artwork fade shortened. Confirmed Free Run loading temporarily uses bounded4x data-disc timing and restores the prior rate on gameplay entry; an instant-disc experiment was rejected and is absent. Recorded transition7.99s ->5.82s; required initialization remains.21/21 tests, full driving lap, positive rising jump, and168/0 GPU probe pass. Evidence:Port/data/distance-fade-jumps/bounded,drive,positive-close.json. Earlier final/ directory is a rejected experiment, not release validation.

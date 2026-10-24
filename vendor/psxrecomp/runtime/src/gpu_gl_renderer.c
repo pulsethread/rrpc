@@ -614,6 +614,8 @@ static void hiw_mirror_copy(int sx, int sy, int dx, int dy, int w, int h);
 static GLuint        s_present_tex = 0;    /* CPU-readout present path (24bpp) */
 static int           s_present_w = 0, s_present_h = 0;
 static GLuint        s_osd_tex = 0;
+static GLuint        s_stats_osd_tex = 0;
+static int           s_stats_osd_tw = 0, s_stats_osd_th = 0;
 static int           s_osd_tw = 0, s_osd_th = 0;
 static GLuint        s_present_prog = 0, s_present_vao = 0;
 static GLuint        s_xr_color_prog = 0, s_xr_native_tex = 0;
@@ -4429,7 +4431,7 @@ static void depth_clear_now(void) {
     flush_tex_batch();
 #ifdef RAGE_GRAPHICS_OPTIONS
     if(s_scene_depth_owned) {
-        rage_native_scene_flush();s_vehicle_shadow_valid=0;
+        rage_native_scene_flush();s_vehicle_shadow_valid=0;s_far_shadow_valid=0;
         s_scene_views.count=0;
         s_rage_dof_views.count=0;
         // Scene depth belongs to the frame, not a legacy clipping rectangle.
@@ -5020,6 +5022,7 @@ static void gpu_textured_triangle(const int *xs, const int *ys,
                 if(s_scene_vertices[i].flags&RAGE_SCENE_MATERIAL_REGION)vp[26]+=(float)512;
             }
             if(scene_material>=0)vp[26]=(float)(((int)vp[26]&960)|(filter&15));
+            if(scene_native && (s_scene_vertices[i].flags&RAGE_SCENE_UI))vp[26]+=32.f;
             if(scene_native && (s_scene_vertices[i].flags&RAGE_SCENE_STARTER))vp[26]+=2097152.f;
             if(scene_native && (s_scene_vertices[i].flags&RAGE_SCENE_PLAYER_VEHICLE))vp[26]+=8388608.f;
             if(scene_native && (s_scene_vertices[i].flags&RAGE_SCENE_VEHICLE))vp[26]+=4194304.f;
@@ -6805,6 +6808,7 @@ void gl_renderer_shutdown(void) {
     s_present_w = 0;
     s_present_h = 0;
     s_osd_tex = 0;
+    s_stats_osd_tex=0;s_stats_osd_tw=s_stats_osd_th=0;
     s_osd_tw = 0;
     s_osd_th = 0;
     s_depth24_skip_up = 0;
@@ -9697,7 +9701,15 @@ static int pt_cb_ctx(void *user, int current) {
 
 /* The one owned swap call: the composing thread's (direct) or the present
  * thread's. */
-static void gl_window_swap(void) { SDL_GL_SwapWindow(s_win); }
+#ifdef RAGE_GRAPHICS_OPTIONS
+extern void rage_stats_note_present(void);
+extern const uint32_t* rage_stats_image(int*,int*);
+#endif
+static void gl_window_swap(void) { SDL_GL_SwapWindow(s_win);
+#ifdef RAGE_GRAPHICS_OPTIONS
+    rage_stats_note_present();
+#endif
+}
 
 static void *pt_cb_present(void *user, int slot, void *ready) {
     (void)user;
@@ -9885,6 +9897,21 @@ static void gl_swap_with_osd(void) {
                 gl_draw_osd_image(px, ow, oh, ww, wh, 0, 0, ww, wh);
         }
     }
+#ifdef RAGE_GRAPHICS_OPTIONS
+    if(s_ctx && s_present_prog){int ow=0,oh=0,ww=0,wh=0;const uint32_t* image=rage_stats_image(&ow,&oh);
+        if(image){SDL_GL_GetDrawableSize(s_win,&ww,&wh);int margin=12;
+            float scale=fminf(wh/720.f,ww/(float)(ow+2*margin));if(scale<.5f)scale=.5f;
+            int dw=(int)(ow*scale),dh=(int)(oh*scale);
+            // Keep a separate bitmap texture: sharing the minimap/toast image
+            // would reallocate it twice on every displayed frame.
+            const GLuint old_tex=s_osd_tex;const int old_w=s_osd_tw,old_h=s_osd_th;
+            s_osd_tex=s_stats_osd_tex;s_osd_tw=s_stats_osd_tw;s_osd_th=s_stats_osd_th;
+            gl_draw_osd_image_mode(image,ow,oh,dw,dh,ww-dw-margin,margin,ww,wh,1);
+            s_stats_osd_tex=s_osd_tex;s_stats_osd_tw=s_osd_tw;s_stats_osd_th=s_osd_th;
+            s_osd_tex=old_tex;s_osd_tw=old_w;s_osd_th=old_h;
+        }
+    }
+#endif
     if (!rth_replaying()) host_osd_present_done();   /* replay: done at record */
     /* present_shot (GL backend): the default framebuffer now holds the composed
      * frame — display quad fitted to the window, plus OSD — so this is the only
@@ -11012,6 +11039,21 @@ int gl_renderer_request_internal_scale(int scale) {
     if (dyn_record_step(scale)) return 1;
     s_dyn_pending = scale == s_hr_scale ? 0 : scale;
     return 1;
+}
+
+int gl_renderer_request_manual_scale(int scale) {
+    GL_RT_SYNC("manual_internal_scale");
+    if (!s_ctx || !s_raster_ok || s_hiw || s_cpu_auth_dual) return 0;
+    const int allowed = psx_gl_clamp_full_vram_scale(scale, GL_MAX_INTERNAL_SCALE,
+                                                   s_gl_max_dim, s_vram_budget, NULL);
+    if (scale < 1 || allowed != scale) return 0;
+    if (g_wide_w > 0 && (int64_t)g_wide_w * scale > s_gl_max_dim) return 0;
+    if (!dyn_resources()) return 0;
+    s_dyn_on = 1;
+    if (s_alloc_scale < s_hr_scale) s_alloc_scale = s_hr_scale;
+    if (s_alloc_scale < scale) s_alloc_scale = scale;
+    s_req_scale = scale;
+    return gl_renderer_request_internal_scale(scale);
 }
 
 int gl_renderer_step_internal_scale_now(int scale) {
@@ -14288,6 +14330,7 @@ static void gl_rth_exec(void *user, const RtCmd *c, const void *payload) {
 #include "rage_retained_terrain.h"
 static void rage_terrain_replay(const RageTerrainBatchHeader* h,
     const PSXTerrainTriangle* triangles,uint16_t flags,int capture) {
+    if(h->pose.flags&RAGE_SCENE_SHADOW_ONLY){if(!capture)rage_retained_terrain_draw(h,triangles);return;}
     if(!capture && rage_retained_terrain_draw(h,triangles))return;
     uint32_t window=h->restore_window;
     struct {PSXProjectedVertex vertices[3];int32_t args[6];} p;

@@ -3,6 +3,14 @@
 #include <stddef.h>
 #include <string.h>
 #include <stdlib.h>
+/* A shared viewport is not proof of a world transform: finish banners and
+ * other camera-space effects deliberately stay outside world lighting. */
+static inline int rage_native_world_lit(int terrain,int vehicle,int background){return !background && (terrain || vehicle);}
+static inline int rage_native_shadow_receiver(int terrain,int vehicle,int background,int semi){return rage_native_world_lit(terrain,vehicle,background) && (semi<0 || vehicle);}
+/* GPU gather identity excludes all live transforms and includes the immutable
+ * allocation serial, so an evicted/reused buffer can never match old contents. */
+typedef struct RageNativeStreamKey {uint64_t serial;uint32_t source,first,count,reserved;} RageNativeStreamKey;
+static inline int rage_native_stream_layout_equal(const RageNativeStreamKey* a,size_t count,const RageNativeStreamKey* b,size_t old_count){return count==old_count && (!count || !memcmp(a,b,count*sizeof(*a)));}
 typedef struct RageNativeViews {int count,rect[16][4];} RageNativeViews;
 /* These tags belong to the immutable vertex payload, including its dense
  * pose indices. Resolve once on cache admission, not on every view/replay. */
@@ -34,6 +42,7 @@ static inline void rage_native_pack_vertex(float out[16],const float source[32],
     memcpy(out,source+27,12);memcpy(out+3,source+2,8);memcpy(out+5,source+4,12);
     out[8]=source[31]-1;out[9]=(float)pose;
     out[10]=source[13]+(float)((((unsigned)source[26]>>10)&255u)*2u);out[11]=(float)(((int)source[26]&15)|(((int)source[26]&64)?16:0)|(((int)source[26]&128)?32:0)|(((int)source[26]&256)?64:0)|(((int)source[26]&16)?128:0)|(((int)source[26]&512)?256:0));
+    if((unsigned)source[26]&32u)out[11]+=32768;
     if((unsigned)source[26]&2097152u)out[11]+=4096;
     if((unsigned)source[26]&8388608u)out[11]+=16384;
     if((unsigned)source[26]&4194304u)out[11]+=8192;

@@ -7,6 +7,16 @@
 #define require(x) do {if(!(x))throw std::runtime_error(#x);} while(0)
 int main() {
     try {
+        // Retained stream reuse depends on allocation/content ranges, never on
+        // camera or pose palettes; replacements and reordered spans must miss.
+        {RageNativeStreamKey old[2]={{1,7,0,6,0},{2,8,3,9,0}},now[2];memcpy(now,old,sizeof old);
+         require(rage_native_stream_layout_equal(now,2,old,2));
+         require(!rage_native_stream_layout_equal(now,1,old,2));
+         now[0].serial=3;require(!rage_native_stream_layout_equal(now,2,old,2));memcpy(now,old,sizeof old);
+         now[1].source=9;require(!rage_native_stream_layout_equal(now,2,old,2));memcpy(now,old,sizeof old);
+         now[1].first=4;require(!rage_native_stream_layout_equal(now,2,old,2));memcpy(now,old,sizeof old);
+         now[1].count=12;require(!rage_native_stream_layout_equal(now,2,old,2));}
+
         // Compare cache-admission tags with the original draw-time scans.
         // Player tags may precede caster tags or appear on another vertex;
         // the first player pose wins, but only if the batch casts a shadow.
@@ -26,6 +36,18 @@ int main() {
             }
         }
         require(rage_native_mesh_tags(nullptr,0).player_pose==-1);
+        // Camera-space goal effects share the track viewport but must never
+        // receive lighting; glass remains translucent while vehicles can mix
+        // opaque panels and transparent lamps within one mesh.
+        require(!rage_native_world_lit(0,0,0));
+        require(!rage_native_shadow_receiver(0,0,0,-1));
+        require(rage_native_shadow_receiver(1,0,0,-1));
+        require(!rage_native_shadow_receiver(1,0,0,0));
+        require(rage_native_shadow_receiver(0,1,0,0));
+        require(!rage_native_shadow_receiver(1,0,1,-1));
+        {float input[32]={},output[16]={};input[26]=32.f;rage_native_pack_vertex(output,input,0);
+         require((int(output[11])&32768)!=0);require((int(output[11])&8192)==0);}
+
         // Signed authored layer offsets and raw-texture mode coexist in the
         // immutable native vertex key, without touching geometry or UVs.
         {float input[32]={},output[16]={};input[13]=1;input[26]=float(255u<<10);rage_native_pack_vertex(output,input,0);

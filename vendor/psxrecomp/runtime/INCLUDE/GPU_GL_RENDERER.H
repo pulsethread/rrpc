@@ -368,6 +368,9 @@ int  gl_renderer_dynamic_resolution_ceiling(void);
 /* Ask for a level: applied at the next post-present point outside a render
  * pass (clamped to 1..ceiling). Returns 0 when steps are not available. */
 int  gl_renderer_request_internal_scale(int scale);
+/* Manual menu change: may grow the startup ceiling within GPU/memory limits.
+ * Preserves VRAM through the same ordered post-present resize path. */
+int  gl_renderer_request_manual_scale(int scale);
 /* Step now (debug probes and tests): 1 when the level is `scale` on return,
  * 0 when refused or deferred (inside a render pass; it then applies after
  * the next present). Never call it inside a render pass. */

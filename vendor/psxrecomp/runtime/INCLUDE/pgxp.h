@@ -291,6 +291,11 @@ void pgxp_note_nclip(int disagree, int corrected);
 
 /* SWC2 site: copy the GTE register shadow (regs 12..15) to the RAM shadow. */
 void pgxp_store_gte_reg(uint32_t addr, uint8_t reg);
+#ifdef RAGE_GRAPHICS_OPTIONS
+/* Native menu producer: bind exact screen/depth coordinates to its own packet
+ * word after writing it. No GTE state or position-cache fallback is changed. */
+int pgxp_store_host_vertex(uint32_t addr,uint32_t packed,double x,double y,double z);
+#endif
 /* After a title's original store: retain a projected SXY's precision/depth
  * when only clip/outcode bits outside the GPU's two 11-bit fields changed.
  * The caller supplies the current GTE word and actual stored word. Changed

@@ -1,17 +1,19 @@
 /* Included on the GL consumer after terrain commands and material ownership
  * are defined. Commands retain their source payload; only this GPU-thread
  * cache borrows native buffers, checked by a never-reused allocation serial. */
-enum { RAGE_RETAINED_TERRAIN_SLOTS=1024 };
+enum { RAGE_RETAINED_TERRAIN_SLOTS=8192 };
 typedef struct RageTerrainRun {int first,count,semi,decal,terrain;} RageTerrainRun;
 typedef struct RageRetainedTerrain {
-    uint64_t identity,serial,layout;
+    uint64_t identity,serial,layout,touched;
     uint32_t first,count,variant[6];
     RageNativeBuffer* mesh;
     unsigned runs,materials;
     uint16_t slots[128];
+    uint64_t material_keys[128];
     RageTerrainRun run[128];
 } RageRetainedTerrain;
 static RageRetainedTerrain s_retained_terrain[RAGE_RETAINED_TERRAIN_SLOTS];
+static uint64_t s_retained_terrain_clock;
 static _Atomic uint64_t s_retained_terrain_hits,s_retained_terrain_builds,s_retained_terrain_vertices;
 void gl_renderer_retained_terrain_stats(uint64_t out[5]){
     out[0]=atomic_load(&s_retained_terrain_hits);
@@ -25,15 +27,34 @@ static int rage_retained_terrain_draw(const RageTerrainBatchHeader* h,const PSXT
     if(!enabled || !h->identity || !h->count || h->count>128 || !rage_compact_terrain() ||
        !s_scene_depth_owned || s_selected_bank_tex || s_hd_native_authority || !rage_native_init())return 0;
     flush_cpu_upload();flush_flat_batch();flush_tex_batch();
-    const uint32_t variant[6]={h->pose.flags,h->source,h->unlit,(uint32_t)s_tex_filter,
+    const int shadow_only=(h->pose.flags&RAGE_SCENE_SHADOW_ONLY)!=0;
+    const uint32_t variant[6]={h->pose.flags&~RAGE_SCENE_SHADOW_ONLY,h->source,h->unlit,(uint32_t)s_tex_filter,
         (uint32_t)s_tex_lod,(uint32_t)gl_renderer_accurate_blending()};
     const uint64_t key=(h->identity*0x9e3779b185ebca87ull)^((uint64_t)h->first*0xc2b2ae3d27d4eb4full)^rage_native_geometry_key(variant,sizeof variant);
-    RageRetainedTerrain* entry=&s_retained_terrain[(key^(key>>32))&(RAGE_RETAINED_TERRAIN_SLOTS-1)];
+    // Four ways avoid alternating terrain identities evicting each other at
+    // one direct-mapped slot during every main/generated frame.
+    const size_t bucket=((key^(key>>32))&((RAGE_RETAINED_TERRAIN_SLOTS/4)-1))*4;
+    RageRetainedTerrain* entry=&s_retained_terrain[bucket];
+    for(int way=0;way<4;++way){RageRetainedTerrain* candidate=&s_retained_terrain[bucket+way];
+        if(candidate->identity==h->identity && candidate->first==h->first && candidate->count==h->count && !memcmp(candidate->variant,variant,sizeof variant)){entry=candidate;break;}
+        if(!candidate->identity || (entry->identity && candidate->touched<entry->touched))entry=candidate;
+    }
+    entry->touched=++s_retained_terrain_clock;
     int valid=entry->identity==h->identity && entry->first==h->first && entry->count==h->count &&
-        !memcmp(entry->variant,variant,sizeof variant) && entry->layout==s_material_layout_generation &&
+        !memcmp(entry->variant,variant,sizeof variant) &&
         entry->mesh && entry->mesh->buffer && entry->mesh->serial==entry->serial;
     if(valid)for(unsigned i=0;i<entry->materials;++i){
-        if(s_material_slots[entry->slots[i]].dirty){valid=0;break;}
+        const RageMaterialSlot* m=&s_material_slots[entry->slots[i]];
+        if(!m->occupied || m->key!=entry->material_keys[i]){valid=0;break;}
+        if(m->dirty){
+            // Texture pixels can animate without changing vertex buffers or
+            // atlas addresses. Refresh only this material, preserving ordering.
+            const int px=m->page_x,py=m->page_y,depth=m->depth,cx=m->cx,cy=m->cy,window=m->twin;
+            glb_set_texture_window(window);
+            const int slot=rage_material_acquire(px,py,depth,cx,cy);
+            glb_set_texture_window(h->restore_window);
+            if(slot!=entry->slots[i] || s_material_slots[slot].key!=entry->material_keys[i]){valid=0;break;}
+        }
     }
     if(!valid){
         RageRetainedTerrain next={0};
@@ -50,7 +71,7 @@ static int rage_retained_terrain_draw(const RageTerrainBatchHeader* h,const PSXT
                 ((page>>4)&1)*256,depth>2?2:depth,(clut&63)*16,(clut>>6)&511);
             if(material<0){glb_set_texture_window(h->restore_window);return 0;}
             unsigned m=0;while(m<next.materials && next.slots[m]!=material)++m;
-            if(m==next.materials)next.slots[next.materials++]=(uint16_t)material;
+            if(m==next.materials){next.material_keys[next.materials]=s_material_slots[material].key;next.slots[next.materials++]=(uint16_t)material;}
             const int semi=((t->colour>>24)&2)?((t->page>>5)&3):-1;
             const int decal=((t->flags|h->pose.flags)&RAGE_SCENE_DECAL)!=0;
             const int terrain=((t->flags|h->pose.flags)&RAGE_SCENE_COVERAGE)?2:1;
@@ -76,7 +97,7 @@ static int rage_retained_terrain_draw(const RageTerrainBatchHeader* h,const PSXT
             if(glGetError()!=GL_NO_ERROR){p_glDeleteBuffers(1,&next.mesh->expanded);next.mesh->expanded=0;}
             else atomic_fetch_add(&s_native_gpu_bytes,(uint64_t)h->count*3*64);
         }
-        next.serial=next.mesh->serial;next.layout=s_material_layout_generation;
+        next.serial=next.mesh->serial;next.layout=s_material_layout_generation;next.touched=s_retained_terrain_clock;
         *entry=next;
         atomic_fetch_add(&s_retained_terrain_builds,1);
     }else{
@@ -89,9 +110,10 @@ static int rage_retained_terrain_draw(const RageTerrainBatchHeader* h,const PSXT
     // is fixed; camera, mirror winding, fade time and viewport remain live.
     // A requested depth clear may drain the queue; do it before reserving
     // the records so an allocation failure still has a complete fallback.
-    s_pz[0]=s_pz[1]=s_pz[2]=256;depth_before_tri();
-    s_depth_tris+=h->count-1;
-    if(s_native_queued+(int)entry->runs>1024)rage_native_scene_flush();
+    // Establish this frame's scene-depth boundary before queuing any light
+    // receipts, or the first colour draw would drain and discard their map.
+    s_pz[0]=s_pz[1]=s_pz[2]=256;depth_before_tri();s_depth_tris+=h->count-1;
+    if(s_native_queued+(int)entry->runs>rage_native_queue_limit())rage_native_scene_flush();
     // Reserve every queue record before submission. On allocation failure no
     // partial range has escaped, so the complete copied command can fall back.
     for(unsigned i=0;i<entry->runs;++i){RageNativeGroup* g=&s_native_queue[s_native_queued+i];
@@ -99,16 +121,17 @@ static int rage_retained_terrain_draw(const RageTerrainBatchHeader* h,const PSXT
             if(!grown)return 0;g->palette=grown;g->palette_capacity=80;++s_native_palette_grows;}
     }
     const int xs[3]={s_area_x1,s_area_x2,s_area_x1},ys[3]={s_area_y1,s_area_y1,s_area_y2};
-    mark_prim_dirty(xs,ys,3,1);
+    if(!shadow_only)mark_prim_dirty(xs,ys,3,1);
     float camera[4]={h->pose.drawing_camera[0],h->pose.drawing_camera[1],h->pose.drawing_camera[2],1};
     if(h->pose.fade_start>0)camera[3]=2+h->pose.fade_start;
     ++entry->mesh->pins;
     for(unsigned i=0;i<entry->runs;++i){const RageTerrainRun* run=&entry->run[i];
         s_tb_scene_terrain=run->terrain;
         rage_native_scene_queue(entry->mesh,run->count,run->semi,run->decal,0,1,
-            h->pose.drawing,h->pose.projection,camera,0,-1,&h->pose.lamps);
+            h->pose.drawing,h->pose.projection,camera,shadow_only?2:0,-1,&h->pose.lamps);
         s_native_queue[s_native_queued-1].first=run->first;
         s_native_queue[s_native_queued-1].retained=1;
+        s_native_queue[s_native_queued-1].shadow_only=shadow_only;
     }
     --entry->mesh->pins;s_scene_prims_tex+=h->count;
     return 1;

@@ -1832,6 +1832,18 @@ extern "C" int pgxp_probe_precise_vertex(uint32_t addr, uint32_t packet_word,
 /* Emitted at every swc2 since ABI v14 (all flavours, all backends, overlay
  * DLLs). In the pgxp flavour psx_pgxp_cop2 supersedes it for the same swc2 —
  * the double write is idempotent (same source shadow, same destination). */
+#ifdef RAGE_GRAPHICS_OPTIONS
+extern "C" int pgxp_store_host_vertex(uint32_t addr,uint32_t packed,double x,double y,double z){
+    if(!g_pgxp_active || (addr&3u) || !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z) || z<1 || z>65535 ||
+       x<-1024 || x>1023 || y<-1024 || y>1023 || std::abs(x-int16_t(packed))>1 || std::abs(y-int16_t(packed>>16))>1)return 0;
+    auto* dst=pgxp_ptr_w(addr);if(!dst)return 0;
+    *dst={};dst->x16=int32_t(std::lround(x*65536));dst->y16=int32_t(std::lround(y*65536));
+    dst->z=uint16_t(z);dst->value=packed;dst->gen=s_gen;dst->flags=PGXP_F_VXY|PGXP_F_VZ|PGXP_F_PROJECTION;
+    dst->projection.x=float(x*z);dst->projection.y=float(y*z);dst->projection.z=float(z);dst->projection.near_z=1;
+    return 1;
+}
+#endif
+
 extern "C" void pgxp_store_gte_reg(uint32_t addr, uint8_t reg) {
     if (!g_pgxp_active) return;
     PGXPValue *dst = pgxp_ptr_w(addr);

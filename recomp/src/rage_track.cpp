@@ -9,6 +9,7 @@
 #include "rage_minimap.h"
 #include "rage_free_world.h"
 #include "rage_free_run.h"
+#include "rage_vehicle_shadow.h"
 #include "cpu_state.h"
 #include "execution_profile.h"
 #include "native_terrain_mirror.h"
@@ -27,7 +28,7 @@
 
 namespace {
 bool enabled=false;
-std::atomic<int> extended_distance{0},lod_fade{1};
+std::atomic<int> extended_distance{0},lod_fade{1},sky_light{1},shadow_quality{2};
 std::atomic<bool> replay_distance{false};
 std::atomic<uint64_t> fade_starts{0};
 std::atomic<uint64_t> native_views{0};
@@ -51,7 +52,8 @@ struct ProjectionCache {
 struct FadeView {std::vector<RageTrackFadeState> sectors;float seen=-1000;ProjectionCache current,previous;};
 std::unordered_map<uint32_t,FadeView> fade_views;
 
-struct PreparedSector {std::vector<PSXTerrainTriangle> layers[2],later[2];uint64_t identity[4]={};};
+struct PreparedBatch {std::vector<PSXTerrainTriangle> triangles;uint64_t identity=0;unsigned routes=0,layer=0;bool later=false;float lo[3]={1e30f,1e30f,1e30f},hi[3]={-1e30f,-1e30f,-1e30f};};
+struct PreparedSector {std::vector<PreparedBatch> batches;};
 uint64_t next_prepared_identity=0;
 using PreparedCourse=std::vector<PreparedSector>;
 std::vector<uint8_t> tunnel_points;
@@ -62,9 +64,15 @@ std::shared_ptr<PreparedCourse> course_prepared;
 std::shared_ptr<PreparedCourse> prepare_course(const RageTrackCourse& mesh){
     auto result=std::make_shared<PreparedCourse>(mesh.sectors.size());
     for(size_t s=0;s<mesh.sectors.size();++s){const auto& sector=mesh.sectors[s];
-        for(auto& id:(*result)[s].identity)id=++next_prepared_identity;
+
         for(uint32_t q=sector.first;q<sector.first+sector.count;++q){
             const auto& face=mesh.faces[sector.draw_order.empty()?q:sector.draw_order[q-sector.first]];
+            auto& batches=(*result)[s].batches;
+            if(batches.empty() || batches.back().routes!=face.free_run_routes || batches.back().later!=bool(face.free_run_later) || batches.back().layer!=face.decal || batches.back().triangles.size()>=128){
+                batches.emplace_back();auto& batch=batches.back();batch.identity=++next_prepared_identity;batch.routes=face.free_run_routes;batch.later=face.free_run_later!=0;batch.layer=face.decal;
+            }
+            auto& batch=batches.back();
+            for(auto v:face.vertex)for(int k=0;k<3;++k){batch.lo[k]=std::min(batch.lo[k],mesh.vertices[v][k]);batch.hi[k]=std::max(batch.hi[k],mesh.vertices[v][k]);}
             PSXTerrainTriangle t{};t.colour=face.colour;t.page=face.page;t.window=face.window;
             t.clut[0]=uint16_t(face.clut+((face.type==3 || face.type==5)?1:0));
             t.clut[1]=uint16_t(face.clut+((face.type==3 || face.type==5 || face.type<2)?1:0));
@@ -85,7 +93,7 @@ std::shared_ptr<PreparedCourse> prepare_course(const RageTrackCourse& mesh){
             for(uint32_t i=face.first_triangle;i<face.first_triangle+face.triangle_count;++i){
                 const auto& tri=mesh.triangles[i];memcpy(t.uv,tri.uv,sizeof t.uv);
                 for(int k=0;k<3;++k)memcpy(t.local+3*k,mesh.vertices[tri.vertex[k]].data(),12);
-                (face.free_run_later?(*result)[s].later[face.decal!=0]:(*result)[s].layers[face.decal!=0]).push_back(t);
+                batch.triangles.push_back(t);
             }
         }
     }
@@ -108,7 +116,7 @@ struct PointHash { size_t operator()(const Point& p)const {
 struct Packet {uint32_t address,count;std::array<uint32_t,12> words;};
 struct View {
     uint32_t start=0,end=0,ctx=0,ret=0,sp=0,tick=0,key=0,unlit=0,texture_source=0;
-    bool hide_later=false;
+    bool hide_later=false,tunnel_open=false;unsigned route=0;
     RageSceneVertex pose{};
     std::shared_ptr<RageTrackCourse> mesh;
     std::shared_ptr<PreparedCourse> prepared;
@@ -180,6 +188,10 @@ bool visible(const RageTrackSector& sector,const RageSceneVertex& pose,int left,
 }
 }
 
+extern "C" void rage_track_set_shadow_quality(int quality){shadow_quality.store(std::clamp(quality,0,3),std::memory_order_relaxed);}
+extern "C" int rage_track_shadow_quality(){return shadow_quality.load(std::memory_order_relaxed);}
+extern "C" void rage_track_set_sky_light(int on){sky_light.store(on!=0,std::memory_order_relaxed);}
+extern "C" int rage_track_sky_light(){return sky_light.load(std::memory_order_relaxed);}
 extern "C" void rage_track_set_extended_distance(int on){extended_distance.store(on!=0,std::memory_order_relaxed);}
 extern "C" int rage_track_extended_distance(){return extended_distance.load(std::memory_order_relaxed);}
 extern "C" float rage_track_fade_clock(){
@@ -191,7 +203,7 @@ extern "C" uint64_t rage_track_fade_starts(){return fade_starts.load(std::memory
 extern "C" uint64_t rage_track_native_views(){return native_views.load(std::memory_order_relaxed);}
 extern "C" uint64_t rage_track_native_mirror_views(){return native_mirror_views.load(std::memory_order_relaxed);}
 extern "C" int rage_track_lod_fade(){return lod_fade.load(std::memory_order_relaxed);}
-extern "C" float rage_track_far_limit(){return !replay_distance.load(std::memory_order_relaxed) && rage_track_extended_distance()?196608.f:131072.f;}
+extern "C" float rage_track_far_limit(){return replay_distance.load(std::memory_order_relaxed)?81920.f:(rage_track_extended_distance()?139264.f:106496.f);}
 extern "C" int rage_track_replay_distance(){return replay_distance.load(std::memory_order_relaxed);}
 
 bool rage_track_decode(CPUState* cpu,uint32_t grid,uint32_t table,uint32_t pool,
@@ -291,10 +303,11 @@ extern "C" void rage_track_dispatch(CPUState* cpu,uint32_t target) {
         replay_distance.store(cpu->read_word(rage_region_address(0x801e42e4))==17,std::memory_order_relaxed);
     // The retained environment walker has its own stock near/far sector
     // limits. Extend these as well as the reconstructed terrain's range.
-    if(target==0x414f0 && !replay_distance.load(std::memory_order_relaxed) && extended_distance.load(std::memory_order_relaxed)){
+    if(target==0x414f0 && !replay_distance.load(std::memory_order_relaxed)){
         const int32_t near_limit=int32_t(cpu->gpr[4]),far_limit=int32_t(cpu->gpr[5]);
         if(near_limit>=-131072 && near_limit<=0 && far_limit>0 && far_limit<=131072){
-            cpu->gpr[4]=uint32_t(near_limit*3/2);cpu->gpr[5]=uint32_t(far_limit*3/2);
+            const int32_t wanted=int32_t(rage_track_far_limit());
+            cpu->gpr[4]=uint32_t(int64_t(near_limit)*wanted/81920);cpu->gpr[5]=uint32_t(int64_t(far_limit)*wanted/81920);
         }
     }
     if(!enabled)return;
@@ -342,7 +355,7 @@ extern "C" void rage_track_dispatch(CPUState* cpu,uint32_t target) {
     pending.tick=new_tick;pending.key=pending.ret^(cpu->read_word(pending.ctx+0x68)?0x1000000u:0);
     rage_scene_lights_capture(cpu,new_tick);
     pending.unlit=cpu->read_word(pending.ctx+0x84)!=0;
-    pending.hide_later=rage_free_world_hide_later(cpu);
+    pending.hide_later=rage_free_world_hide_later(cpu);pending.route=rage_free_world_current_route();pending.tunnel_open=rage_free_world_tunnel_routes_open(cpu);
     // Capture exactly the stock renderer's visible sector identities. Native
     // interpolation reuses this selection rather than extending it off-camera.
     if(pending.stock_distance){const uint32_t cells=cpu->gpr[5],count=cpu->gpr[6];
@@ -480,6 +493,23 @@ extern "C" int rage_track_submit(uint32_t packet,int dx,int dy,uint32_t texture_
         }
         // Record +24 is the original edge-line command/colour, not a decal
         // classification. Every opaque course face must establish scene depth.
+        // Submit nearby opaque/masked scenery to the light independently of
+        // the camera frustum. These receipts never draw into the scene colour
+        // or depth buffers, and reuse the exact resident terrain payload.
+        const char* shadow_option=std::getenv("RAGE_ENVIRONMENT_SHADOWS");
+        if(prepared && rage_track_sky_light() && rage_track_shadow_quality()>0 && (!shadow_option || shadow_option[0]!='0') && !(pose.flags&RAGE_SCENE_MIRRORED_VIEW)){
+            RageEnvironmentLight light;float lightRows[12];
+            if(rage_scene_environment_light(pose.lamps.tick,1,&light) &&
+               rage_directional_shadow_map_grid(pose.drawing_camera,light.direction,rage_track_far_limit()*1.5f,rage_shadow_resolution(rage_track_shadow_quality()),lightRows)){
+                auto shadow=pose;shadow.flags|=RAGE_SCENE_SHADOW_ONLY;shadow.fade_start=0;
+                for(size_t i=0;i<view.mesh->sectors.size();++i){const auto& sector=view.mesh->sectors[i];
+                    if(!rage_shadow_bounds_visible(lightRows,sector.lo,sector.hi,4096))continue;
+                    const auto& data=(*view.prepared)[i];
+                    for(const auto& batch:data.batches)if(!batch.layer && rage_free_world_batch_visible(view.route,batch.routes,view.hide_later,batch.later,batch.lo,batch.hi,pose.drawing_camera,view.tunnel_open))
+                        gl_renderer_draw_retained_terrain(&shadow,batch.triangles.data(),(unsigned)batch.triangles.size(),view.texture_source,view.unlit,texture_window,batch.identity);
+                }
+            }
+        }
         for(int layer=0;layer<2;++layer)for(const auto& sector:view.mesh->sectors) {
             if(view.stock_distance && view.stock_cells_valid){
                 if(sector.cell_x<0 || sector.cell_z<0)continue;
@@ -490,17 +520,19 @@ extern "C" int rage_track_submit(uint32_t packet,int dx,int dy,uint32_t texture_
                !(pose.history && visible(sector,previous,left-guard,top-guard,right+guard,bottom+guard)))continue;
             if(prepared){
                 const size_t index=&sector-view.mesh->sectors.data();
-                const auto& triangles=(*view.prepared)[index].layers[layer];
                 auto camera=pose;camera.fade_start=rage_track_lod_fade()?fade.sectors[index].start:0;
-                gl_renderer_draw_retained_terrain(&camera,triangles.data(),(unsigned)triangles.size(),view.texture_source,view.unlit,texture_window,(*view.prepared)[index].identity[layer]);
-                count+=triangles.size();
-                if(!view.hide_later){const auto& later=(*view.prepared)[index].later[layer];
-                    gl_renderer_draw_retained_terrain(&camera,later.data(),(unsigned)later.size(),view.texture_source,view.unlit,texture_window,(*view.prepared)[index].identity[layer+2]);count+=later.size();}
+                for(const auto& batch:(*view.prepared)[index].batches){
+                    if(batch.layer!=unsigned(layer) || !rage_free_world_batch_visible(view.route,batch.routes,view.hide_later,batch.later,batch.lo,batch.hi,pose.drawing_camera,view.tunnel_open))continue;
+                    gl_renderer_draw_retained_terrain(&camera,batch.triangles.data(),(unsigned)batch.triangles.size(),view.texture_source,view.unlit,texture_window,batch.identity);count+=batch.triangles.size();
+                }
                 continue;
             }
             for(uint32_t q=sector.first;q<sector.first+sector.count;++q) {
                 const auto& face=view.mesh->faces[sector.draw_order.empty()?q:sector.draw_order[q-sector.first]];
-                if(face.decal!=unsigned(layer) || (view.hide_later && face.free_run_later))continue;
+                if(face.decal!=unsigned(layer))continue;
+                float lo[3]={1e30f,1e30f,1e30f},hi[3]={-1e30f,-1e30f,-1e30f};
+                for(auto v:face.vertex)for(int k=0;k<3;++k){lo[k]=std::min(lo[k],view.mesh->vertices[v][k]);hi[k]=std::max(hi[k],view.mesh->vertices[v][k]);}
+                if(!rage_free_world_batch_visible(view.route,face.free_run_routes,view.hide_later,face.free_run_later!=0,lo,hi,pose.drawing_camera,view.tunnel_open))continue;
                 // Unlit stream handlers select the adjacent authored palette.
                 // The stored CLUT is the lit variant, not always the final material.
                 const uint16_t clut=(uint16_t)(face.clut+

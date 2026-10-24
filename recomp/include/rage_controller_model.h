@@ -98,9 +98,12 @@ inline Mesh build(){
     tri(m,{6,12.5,13.5},{13,15,13.5},{6,17.5,13.5},0x302d29); // Start.
     box(m,0,23,10.5,15,2,.5,0x65696c); // Subtle manufacturer's plaque.
     // Cable strain relief and a curved cable exiting the top of the shell.
-    box(m,0,32,0,5,10,7,0x242220);
+    const size_t cable_first=m.size();
+    box(m,0,32,-6,5,10,7,0x242220);
     const double cable[][2]={{0,35},{0,46},{4,57},{13,63},{20,72},{18,83}};
-    for(int i=0;i<5;++i)stroke(m,cable[i][0],cable[i][1],cable[i+1][0],cable[i+1][1],0,2.2,0x45413d);
+    for(int i=0;i<5;++i)stroke(m,cable[i][0],cable[i][1],cable[i+1][0],cable[i+1][1],-8,2.2,0x45413d);
+    // Rear cable geometry must remain behind the shell in the painter renderer.
+    for(size_t f=cable_first;f<m.size();++f)m[f].layer=-1;
     // The display never turns the face away. Draw raised controls after the
     // shell so large concave-shell triangles cannot cover a small control
     // through a mean-depth approximation in the original painter renderer.

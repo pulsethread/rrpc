@@ -12,6 +12,7 @@
 #ifdef RAGE_GRAPHICS_OPTIONS
 #include "rage_graphics_options.h"
 #include "rage_scene.h"
+extern "C" int rage_music_fast_load_requested();
 #include "rage_track.h"
 extern "C" void gte_geometry_correction_set(int enabled);
 #endif
@@ -1382,6 +1383,8 @@ void rage_graphics_read(RageGraphicsSettings* settings) {
     settings->anisotropy=g_video_aniso;
     settings->extended_distance=rage_track_extended_distance();
     settings->lod_fade=rage_track_lod_fade();
+    settings->sky_light=rage_track_sky_light();
+    settings->shadow_quality=rage_track_shadow_quality();
     settings->geometry = g_video_geometry_correction;
     settings->perspective = g_video_perspective_texturing;
     settings->seams = g_video_pgxp_seam;
@@ -1395,12 +1398,15 @@ void rage_graphics_menu_pause(int paused) {
 void rage_graphics_apply(const RageGraphicsSettings* settings) {
     GlScaleInfo current{};
     gl_renderer_scale_info(&current);
-    // Full-VRAM allocation is established at context creation. Do not pretend
-    // that changing the requested scale can resize a live framebuffer.
+    // Before context creation seed the startup allocation. Live changes use
+    // the ordered resize path, which preserves guest VRAM and displayed pixels.
     if (!current.effective) {
         g_video_scale = settings->scale;
         g_video_internal_res = settings->scale * g_video_ref_lines;
         g_video_ss_milli = 1000;
+    }
+    if(current.effective && settings->scale!=current.effective){
+        if(gl_renderer_request_manual_scale(settings->scale))g_video_scale=settings->scale;
     }
     g_video_aa = settings->aa != 0;
     g_video_post_aa = settings->aa >= 2 ? settings->aa - 1 : 0;
@@ -1432,6 +1438,8 @@ void rage_graphics_apply(const RageGraphicsSettings* settings) {
     rage_scene_set_original_lod(settings->original_lod);
     rage_track_set_extended_distance(settings->extended_distance);
     rage_track_set_lod_fade(settings->lod_fade);
+    rage_track_set_sky_light(settings->sky_light);
+    rage_track_set_shadow_quality(settings->shadow_quality);
     rage_graphics_apply_motion(settings->fps);
     rage_graphics_apply_aspect(settings->aspect);
     std::fprintf(stdout, "Rage graphics: scale=%d aa=%d filter=%d geometry=%d perspective=%d seams=%d\n",
@@ -4901,7 +4909,14 @@ static ControllerMap controller_map = {{
 /* Per-GUID overrides from input.ini [mapping.<guid>]. Absent GUID => global. */
 static std::unordered_map<std::string, ControllerMap> controller_maps_by_guid;
 
+#ifdef RAGE_GRAPHICS_OPTIONS
+static ControllerMap rage_seat_maps[2];
+static bool rage_seat_maps_set[2]={};
+#endif
 static const ControllerMap& controller_map_for(const PlayerInput& p) {
+#ifdef RAGE_GRAPHICS_OPTIONS
+    for(int seat=0;seat<2;++seat)if(&p==&g_players[seat] && rage_seat_maps_set[seat])return rage_seat_maps[seat];
+#endif
     if (p.guid[0]) {
         auto it = controller_maps_by_guid.find(p.guid);
         if (it != controller_maps_by_guid.end()) return it->second;
@@ -6386,6 +6401,45 @@ static int capture_pad_slot_view(int s, PsxNetPad* out, bool guarded,
 static int capture_pad_slot(int s, PsxNetPad* out, bool guarded) {
     return capture_pad_slot_view(s, out, guarded, false);
 }
+
+#ifdef RAGE_GRAPHICS_OPTIONS
+extern "C" unsigned rage_host_pad_buttons(int slot){
+    if(slot<0 || slot>=2)return 0;
+    const uint16_t value=uint16_t(~sio_get_pad_buttons_slot(slot));
+    return (value>>8)|((value&255)<<8);
+}
+static int rage_controller_device_index(int device){for(int i=0;i<SDL_NumJoysticks();++i)if(SDL_IsGameController(i) && device--==0)return i;return -1;}
+extern "C" int rage_host_device_count(){int count=0;for(int i=0;i<SDL_NumJoysticks();++i)if(SDL_IsGameController(i))++count;return count;}
+extern "C" const char* rage_host_device_name(int device){
+device=rage_controller_device_index(device);
+#if defined(PSX_SDL3)
+const char* n=SDL_GetGamepadNameForID(psx_sdl_joystick_id_for_index(device));
+#else
+const char* n=SDL_GameControllerNameForIndex(device);
+#endif
+return n?n:"Unsupported controller";}
+extern "C" const char* rage_host_device_guid(int device){static char text[40];SDL_JoystickGetGUIDString(SDL_JoystickGetDeviceGUID(rage_controller_device_index(device)),text,sizeof(text));return text;}
+extern "C" void rage_host_assign(int slot,const char* device){
+    if(slot<0 || slot>=2 || !device)return;
+    close_player(g_players[slot]);set_player_device(g_players[slot],device,PSXRecompV4::PAD_MODE_DIGITAL);
+    open_player(g_players[slot],slot);g_offline_pad_count=2;sio_set_pad_connected(slot,g_players[slot].kind!=0);
+}
+extern "C" const char* rage_host_assignment(int slot){if(slot<0 || slot>=2)return "none";const auto& p=g_players[slot];return p.kind==1?"keyboard":p.kind==2?(p.guid[0]?p.guid:"auto"):"none";}
+extern "C" void rage_host_binding(int slot,const char* key,const char* source){
+    if(slot<0 || slot>=2)return;
+    if(!rage_seat_maps_set[slot]){rage_seat_maps[slot]=controller_map_for(g_players[slot]);rage_seat_maps_set[slot]=true;}
+    apply_sources_to_map(rage_seat_maps[slot],key,source);
+}
+extern "C" const char* rage_host_mapping(int slot,const char* key){
+    static std::string result;result.clear();if(slot<0 || slot>=2)return "";
+    for(const auto& entry:controller_map_for(g_players[slot]))if(std::strcmp(entry.ini_name,key)==0){
+        for(const auto& src:entry.sources){if(!result.empty())result+=",";
+            if(src.kind==ControllerSource::Kind::Button)result+=SDL_GameControllerGetStringForButton((SDL_GameControllerButton)src.id);
+            else if(src.kind==ControllerSource::Kind::AxisPositive || src.kind==ControllerSource::Kind::AxisNegative){result+=SDL_GameControllerGetStringForAxis((SDL_GameControllerAxis)src.id);result+=src.kind==ControllerSource::Kind::AxisNegative?"-":"+";}
+        }break;
+    }return result.c_str();
+}
+#endif
 
 /* Netplay-only capture: assigned PlayerInput for this slot only. Never merges
  * keyboard-all / all-controllers (dev_any_input). Same pad-mode / stick rules
@@ -8700,6 +8754,23 @@ static NetplayVblankEpilogue sdl_vblank_present_body(void) {
         load_run = 0;
         release_run = 0;
     }
+    int free_run_confirmed_load = 0;
+#ifdef RAGE_GRAPHICS_OPTIONS
+    if(rage_music_fast_load_requested() && !psx_netplay_active() && !psx_selfcheck_resim_active()){
+        const uint32_t scene=psx_guest_read_word(rage_region_address(0x801e42e4));
+        free_run_confirmed_load=scene==10 || scene==11;
+        if(free_run_confirmed_load)turbo_loads_active=1;
+    }
+    // Use the supported bounded data-disc rate during this load only. Keep
+    // configured instant/faster rates, and restore the exact setting on exit.
+    static int free_run_saved_cd_speed=-1;
+    if(free_run_confirmed_load && free_run_saved_cd_speed<0){
+        CDROMDebugState cd{};cdrom_debug_snapshot(&cd);free_run_saved_cd_speed=cd.speed_divisor;
+        if(cd.speed_divisor>0 && cd.speed_divisor<4)cdrom_set_speed(4);
+    }else if(!free_run_confirmed_load && free_run_saved_cd_speed>=0){
+        cdrom_set_speed(free_run_saved_cd_speed);free_run_saved_cd_speed=-1;
+    }
+#endif
     /* HLE boot-skip window: from reset until the game entry PC first
      * dispatches, run unpaced so the (shell-skipped) BIOS kernel init +
      * SYSTEM.CNF + game EXE load compress to host speed. This replaces the
@@ -8765,7 +8836,7 @@ static NetplayVblankEpilogue sdl_vblank_present_body(void) {
      * paths cannot fork peers during the episode window. */
     if (!psx_netplay_is_resimulating() && !psx_selfcheck_resim_active()) {
         sdl_audio_update(fmv_skip_active,
-                         turbo_loads_active && g_turbo_audio_sink_enabled);
+                         turbo_loads_active && (g_turbo_audio_sink_enabled || free_run_confirmed_load));
     }
 #endif
 
@@ -8886,7 +8957,7 @@ static NetplayVblankEpilogue sdl_vblank_present_body(void) {
          * legacy unpaced host-speed path. Pace every simulated guest frame at
          * the divided period; the presentation skip below remains independent
          * so rendering cost does not distort the selected multiplier. */
-        if (g_turbo_load_wall_multiplier >= 2 &&
+        if (!free_run_confirmed_load && g_turbo_load_wall_multiplier >= 2 &&
             g_frame_period_ms > 0.0) {
             uint64_t perf_start = runtime_perf_section_begin();
             frame_pacer_wait(

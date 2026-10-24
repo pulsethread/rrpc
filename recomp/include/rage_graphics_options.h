@@ -7,6 +7,9 @@ struct RageGraphicsSettings {
     int anisotropy = 1;
     int extended_distance = 0;
     int lod_fade = 1;
+    int sky_light = 1;
+    int display_stats = 0;
+    int shadow_quality = 2; // Off, Low, Medium, High
     int geometry = 0;
     int perspective = 0;
     int seams = 0;

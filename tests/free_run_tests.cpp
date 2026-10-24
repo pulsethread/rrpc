@@ -3,11 +3,17 @@
 #include "rage_free_run_art.h"
 #include "rage_multiplayer_art.h"
 #include "rage_multiplayer.h"
+#include "rage_free_run_tv.h"
 #include <cassert>
 #include <cstring>
 #include <vector>
 int rage_free_world_dispatch(CPUState*,uint32_t){return 0;}
-int controller_draws=0;
+int tunnel_state=0;float tunnel_position[3];
+extern "C" int rage_track_in_tunnel(float x,float y,float z){tunnel_position[0]=x;tunnel_position[1]=y;tunnel_position[2]=z;return tunnel_state;}
+int controller_draws=0,online_mode=0;
+extern "C" void rage_multiplayer_set_online(int v){online_mode=v;}
+extern "C" int rage_multiplayer_online(){return online_mode;}
+extern "C" void rage_multiplayer_switch(int){online_mode=!online_mode;}
 extern "C" void rage_multiplayer_draw(CPUState*){++controller_draws;}
 namespace {
 std::vector<uint16_t> vram(1024*512,0x5a5a);
@@ -20,7 +26,7 @@ extern "C" void gpu_write_gp0(uint32_t value){
     if(upload_stage==2){upload_w=value&0xffff;upload_h=value>>16;upload_pixel=0;upload_stage=3;return;}
     for(int i=0;i<2;++i){
         const int x=upload_x+upload_pixel%upload_w,y=upload_y+upload_pixel/upload_w;
-        assert(x>=604 && x<632 && y>=448 && y<496);
+        assert((x>=604 && x<632 && y>=432 && y<496) || (x>=896 && x<924 && y>=352 && y<384));
         vram.at(y*1024+x)=uint16_t(value>>(16*i));++upload_pixel;
     }
     if(upload_pixel==upload_w*upload_h)upload_stage=0;
@@ -56,9 +62,9 @@ void opening(bool extra){
     assert(upload_stage==0);
     for(int y=0;y<512;++y)for(int x=0;x<1024;++x){
         const bool free=x>=604 && x<632 && y>=448 && y<480;
-        const bool multi=x>=604 && x<632 && y>=480 && y<496;
+        const bool multi=x>=604 && x<632 && ((y>=480 && y<496) || (y>=432 && y<448));
         assert(vram[y*1024+x]==(free?rage_free_run_labels[(y-448)/16][((y-448)%16)*28+x-604]:
-            multi?rage_multiplayer_label[(y-480)*28+x-604]:0x5a5a));
+            multi?rage_multiplayer_labels[y<448?1:0][(y-(y<448?432:480))*28+x-604]:0x5a5a));
     }
     set(0x8009f098,2);
 }
@@ -68,6 +74,16 @@ int main(){
     cpu.write_word=ww;cpu.write_half=wh;cpu.write_byte=wb;cpu.gpr[31]=0x80012344;
     for(unsigned region=0;region<3;++region){
         rage_active_region=region;
+        set(0x801e42e4,12);const auto player=rage_region_address(0x8009e6d4);
+        ww(player,100);ww(player+4,0x80078194);ww(player+0x60,200);ww(player+8,300);
+        for(int lighting=0;lighting<4;++lighting)for(int tunnel:{0,1}){
+            tunnel_state=tunnel;cpu.gpr[4]=4500;cpu.gpr[5]=1;cpu.gpr[6]=lighting;cpu.gpr[7]=80;
+            assert(hook(0x8003351c)==0 && cpu.gpr[6]==unsigned(tunnel?2:0) && cpu.gpr[7]==0);
+            assert(cpu.gpr[4]==4500 && cpu.gpr[5]==1);
+            assert(tunnel_position[0]==400 && tunnel_position[1]==800 && tunnel_position[2]==1200);
+        }
+        set(0x801e42e4,8);cpu.gpr[6]=3;cpu.gpr[7]=80;hook(0x8003351c);
+        assert(cpu.gpr[6]==3 && cpu.gpr[7]==80);
         for(bool extra:{false,true}){
             opening(extra);
             const std::vector<int> order=extra?std::vector<int>{1,2,2,2,3,4,0}:std::vector<int>{2,2,2,3,4,0};
@@ -84,7 +100,20 @@ int main(){
         assert(rw(cpu.gpr[4]+0x68)==567 && rh(cpu.gpr[4]+0x168)==1);
         ww(cpu.gpr[4]+0x68,uint32_t(-1234));
         assert(hook(0x8003591c)==1 && rw(cpu.gpr[4]+0x68)==766);
-        for(uint32_t p:{0x800352b8u,0x80033090u,0x80032e9cu,0x800357bcu,0x800333dcu,0x80021d68u,0x80022068u,0x8001c974u})assert(hook(p)==1);
+        for(uint32_t p:{0x800352b8u,0x80033090u,0x80032e9cu,0x800357bcu,0x800333dcu,0x80021d68u,0x80022068u})assert(hook(p)==1);
+        set(0x801e42e4,10);set(0x801e42e0,128);
+        assert(hook(0x8001c974)==0 && get(0x801e42e0)==128); // Logo stays on song selection.
+        set(0x801e42e4,12);
+        assert(hook(0x8001c974)==0 && get(0x801e42e0)==128); // Keep the original fade draw path.
+        set(0x801e40b8,0);hook(0x800363d4);assert(get(0x801e40b8)==0 && get(0x801e42e0)==48);
+        set(0x801e40b8,90);hook(0x800363d4);assert(get(0x801e40b8)==90);
+        set(0x801e42e4,10);
+        for(uint32_t offset:{0x80u}){cpu.gpr[31]=rage_region_address(0x8001c974)+offset;assert(hook(0x80046a2c)==0);}
+        cpu.gpr[31]=rage_region_address(0x8001c974)+0xcc;assert(hook(0x80046a2c)==1);
+        cpu.gpr[31]=rage_region_address(0x8001c974)+0x184;assert(hook(0x80046a2c)==1);
+        cpu.gpr[31]=rage_region_address(0x8001c974)+0x11c;assert(hook(0x80016b7c)==1);
+        cpu.gpr[31]=0x80012344;assert(hook(0x80046a2c)==0 && hook(0x80016b7c)==0);
+
         set(0x8009af9c,0);set(0x801e8a8c,120);assert(hook(0x800363d4)==0 && get(0x8009af9c)>0 && get(0x801e8a8c)==0);
         set(0x8019c9f8,0);assert(hook(0x8005aca0)==0 && get(0x8019c9f8)==0);
         set(0x801e428c,6);set(0x801e40d4,3);set(0x8009e6a4,1);
@@ -92,7 +121,7 @@ int main(){
         assert(get(0x8019c9f8)==3 && get(0x8009b340)==4);
         assert(get(0x801e428c)==6 && get(0x8009b34c)==0 && get(0x8009b358)==250000);
         assert(get(0x8009b30c)==1);
-        set(0x8019c9f8,4);set(0x801e42e4,8);
+        set(0x8019c9f8,4);set(0x801e42e4,8);set(0x8009b308,0);
         const uint32_t shape=0x80120000;
         cpu.gpr[5]=shape;wh(shape,36);wh(shape+2,24);wb(shape+4,204);wb(shape+5,0);
         assert(hook(0x80048078)==0 && cpu.gpr[5]==rage_region_address(0x8007fc68));
@@ -111,13 +140,17 @@ int main(){
         opening(false);press(0x4000);press(0x4000);press(0x4000);press(0x40);
         assert(rage_multiplayer_active() && !rage_free_run_active());
         assert(get(0x801e4184)==2);
-        set(0x8019c9f8,1);assert(hook(0x8005aca0)==0 && get(0x8019c9f8)==3);
-        set(0x8019c9f8,4);set(0x801e42e4,8);
+        set(0x8019c9f8,1);assert(hook(0x8005aca0)==0 && get(0x8019c9f8)==1);
+        set(0x8019c9f8,4);set(0x801e42e4,8);set(0x8009b308,0);
         wh(rage_region_address(0x801e436e),0xa860);wh(rage_region_address(0x801e436a),0xa000);
         assert(hook(0x8005568c)==0);
         assert(rh(rage_region_address(0x801e436e))==0 && rh(rage_region_address(0x801e436a))==0);
+        wh(rage_region_address(0x801e436e),0);hook(0x8005568c);rage_multiplayer_set_online(0);
+        wh(rage_region_address(0x801e436e),0x2000);assert(hook(0x8005568c)==0 && online_mode==1);
+        wh(rage_region_address(0x801e436e),0);hook(0x8005568c);
+        wh(rage_region_address(0x801e436e),0x8000);assert(hook(0x8005568c)==0 && online_mode==0);
         const int draws=controller_draws;assert(hook(0x8005131c)==1 && controller_draws==draws+1);
-        for(uint32_t p:{0x8004fce8u,0x800496f0u,0x8004cf30u,0x8004f3ecu,0x80049418u,0x80052158u,0x80048078u})assert(hook(p)==1);
+        for(uint32_t p:{0x8004fce8u,0x800496f0u,0x8004f3ecu,0x80049418u,0x80052158u,0x80048078u})assert(hook(p)==1);
         cpu.gpr[4]=0x80120000;ww(cpu.gpr[4],500);cpu.gpr[5]=20;
         assert(hook(0x800551bc)==1 && rw(cpu.gpr[4])==508 && cpu.gpr[2]==508);
         cpu.gpr[5]=0;assert(hook(0x800551bc)==1 && rw(cpu.gpr[4])==0);
@@ -125,6 +158,25 @@ int main(){
         assert(hook(0x8005568c)==1 && get(0x8019c9f8)==1);
         assert(hook(0x8005aca0)==1 && get(0x801e42e4)==2);
         opening(false);assert(!rage_multiplayer_active());
-        for(uint32_t p:{0x8004fce8u,0x800496f0u,0x8004cf30u,0x8004f3ecu,0x80049418u,0x80052158u,0x8005131cu})assert(hook(p)==0);
+        for(uint32_t p:{0x8004fce8u,0x800496f0u,0x8004f3ecu,0x80049418u,0x80052158u,0x8005131cu})assert(hook(p)==0);
+        // TV drawing borrows only the halfword draw guard, restores it before
+        // model submission, selects the normal loop and preserves other modes.
+        RageFreeRunTV tv;set(0x801e42e4,12);set(0x801e4dac,0x55aa0000);
+        cpu.gpr[29]=0x801ff000;cpu.gpr[31]=0x80012344;cpu.gpr[4]=20;
+        const auto oldPixel=vram[352*1024+896];tv.dispatch(&cpu,0x3d6f0,true);
+        assert(get(0x801e4dac)==0x55aa0001);
+        assert(vram[352*1024+896]==rage_free_run_tv_pixels[0]);
+        cpu.gpr[4]=0x1f800000;cpu.gpr[5]=1;tv.dispatch(&cpu,0x296b4,true);
+        assert(cpu.gpr[5]==29 && get(0x801e4dac)==0x55aa0000);
+        tv.dispatch(&cpu,0x296b4,true);assert(cpu.gpr[5]==7);
+        tv.dispatch(&cpu,0x12344,false);assert(vram[352*1024+896]==oldPixel);
+        cpu.gpr[4]=4;tv.dispatch(&cpu,0x3d6f0,true);assert(get(0x801e4dac)==0x55aa0001);
+        tv.dispatch(&cpu,0x12344,true);assert(get(0x801e4dac)==0x55aa0000);
+        tv.dispatch(&cpu,0x18000,false);
     }
 }
+
+int rage_split_active(){return 0;}
+void rage_split_enter(){}
+void rage_split_update(CPUState*){}
+void rage_split_draw(CPUState*){}

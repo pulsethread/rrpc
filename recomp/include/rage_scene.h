@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include "render_pass_motion.h"
 #include "rage_car_lamps.h"
+#include "rage_environment_light.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -32,6 +33,9 @@ void rage_scene_reset(void);
 void rage_scene_dispatch(struct CPUState* cpu, uint32_t target);
 void rage_scene_lights_capture(struct CPUState* cpu,uint32_t tick);
 int rage_scene_player_light(uint32_t tick,float phase,RageCarLightPose* out);
+int rage_scene_environment_light(uint32_t tick,float phase,RageEnvironmentLight* out);
+/* A retained terrain receipt used only by the light-space pass. */
+#define RAGE_SCENE_SHADOW_ONLY 33554432u
 int rage_scene_tread_winding(struct CPUState* cpu);
 uint64_t rage_scene_tread_faces(void);
 uint32_t rage_scene_pose(const int16_t rotation[9], const int32_t translation[3],

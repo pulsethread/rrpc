@@ -18,7 +18,7 @@ psxrecomp_add_game_runtime(rage-racer
     WINDOW_TITLE "Rage Racer - PC"
     APP_ICON "${CMAKE_CURRENT_SOURCE_DIR}/../assets/Game.ico"
     DEFAULT_GAME_CONFIG_PATH "${CMAKE_CURRENT_SOURCE_DIR}/game.toml"
-    MAX_PLAYERS 1
+    MAX_PLAYERS 2
     GEN_MARKER "generated/SCES_006.50_dispatch.c"
     GEN_FULL_GLOB "generated/SCES_006.50_full_*.c"
 )
@@ -32,17 +32,17 @@ set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/generated/SCES_006.50_dispatch.
     psx_dispatch_game_compiled=rage_eu_psx_dispatch_game_compiled
     psx_game_is_function_entry=rage_eu_psx_game_is_function_entry)
 
-target_sources(rage-racer PRIVATE src/rage_graphics_options.cpp)
+target_sources(rage-racer PRIVATE src/rage_graphics_options.cpp src/rage_stats.cpp)
 target_sources(rage-racer PRIVATE src/rage_music.cpp src/song_catalog.cpp)
 target_sources(rage-racer PRIVATE src/rage_bundle.cpp)
 target_sources(rage-racer PRIVATE src/rage_scene.cpp)
 target_sources(rage-racer PRIVATE src/rage_car_lamps.c)
 target_sources(rage-racer PRIVATE src/rage_minimap.cpp)
 target_sources(rage-racer PRIVATE src/rage_free_run.cpp)
-target_sources(rage-racer PRIVATE src/rage_multiplayer.cpp)
+target_sources(rage-racer PRIVATE src/rage_multiplayer.cpp src/rage_split_select.cpp src/rage_controllers.cpp)
 target_sources(rage-racer PRIVATE src/rage_free_world.cpp)
 target_sources(rage-racer PRIVATE src/rage_track.cpp src/rage_track_topology.cpp src/rage_oval.cpp src/track_texture_snapshot.c src/native_visibility.c)
-target_link_libraries(rage-racer PRIVATE bcrypt comctl32 shell32)
+target_link_libraries(rage-racer PRIVATE bcrypt comctl32 shell32 pdh gdi32)
 target_include_directories(rage-racer PRIVATE include)
 target_compile_definitions(rage-racer PRIVATE RAGE_GRAPHICS_OPTIONS=1 PSX_PGXP=1)
 set(RAGE_EXECUTABLE_NAME "RageRacer" CACHE STRING "Windows executable name")

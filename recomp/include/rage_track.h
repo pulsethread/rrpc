@@ -5,6 +5,10 @@ extern "C" {
 #endif
 struct CPUState;
 void rage_track_enable(int on);
+void rage_track_set_sky_light(int on);
+int rage_track_sky_light(void);
+void rage_track_set_shadow_quality(int quality);
+int rage_track_shadow_quality(void);
 void rage_track_set_extended_distance(int on);
 int rage_track_extended_distance(void);
 int rage_track_replay_distance(void);
@@ -14,6 +18,7 @@ int rage_track_lod_fade(void);
 float rage_track_fade_clock(void);
 void rage_track_reset(void);
 int rage_track_ground_height(float x,float z,float near_y,float* height);
+int rage_track_in_tunnel(float x,float y,float z);
 void rage_track_dispatch(struct CPUState* cpu,uint32_t target);
 int rage_track_native_try(struct CPUState* cpu,uint32_t target);
 void rage_sky_reset(void);
@@ -34,6 +39,7 @@ struct RageTrackFace {
     int8_t depth_bias=0;
     uint32_t first_triangle=0,triangle_count=0;
     uint32_t decal=0; /* Geometrically contained, coplanar ground detail. */
+    uint32_t free_run_routes=0; /* Zero: unrestricted; otherwise owning route bits. */
     uint32_t free_run_later=0; /* Hidden behind the main tunnels from the lower stretch. */
     uint32_t coverage=0; /* Open boundary needs conservative subpixel coverage. */
 };

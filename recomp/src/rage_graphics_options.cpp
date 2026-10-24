@@ -1,4 +1,5 @@
 #include "rage_graphics_options.h"
+#include "rage_controllers.h"
 #include "psx_sdl.h"
 #define WIN32_LEAN_AND_MEAN
 #ifndef NOMINMAX
@@ -11,6 +12,7 @@
 #include <mutex>
 #include <sstream>
 #include <vector>
+#include <atomic>
 #define RAGE_WIDE_IMPL(x) L##x
 #define RAGE_WIDE(x) RAGE_WIDE_IMPL(x)
 
@@ -25,13 +27,14 @@ WNDPROC previous_proc = nullptr;
 HMENU bar = nullptr, graphics = nullptr, resolution = nullptr, aa = nullptr, filtering = nullptr, seams = nullptr, aspect = nullptr;
 HMENU motion = nullptr, options = nullptr, anisotropic = nullptr;
 HMENU filters = nullptr, help = nullptr, dof_strength = nullptr;
-HMENU dof_distance = nullptr;
+HMENU dof_distance = nullptr,shadow_quality=nullptr;
 bool dof_strength_visible = false;
 bool anisotropic_visible=false;
 constexpr int anisotropies[]={1,2,4,8,16};
 std::mutex queue_lock;
 std::vector<int> commands;
 bool configured = false, dirty = false;
+std::atomic<int> stats_visible{0};
 
 void check(HMENU menu, int first, int count, int selected) {
     for (int i = 0; i < count; ++i)
@@ -46,6 +49,8 @@ void update_checks() {
     check(filtering, base + 20, 4, settings.filter);
     const int effects[]={settings.scanlines,settings.crt_texture,settings.crt_shading,settings.crt_distortion,settings.colour_grading};
     for(int i=0;i<5;++i)CheckMenuItem(filters,base+100+i,MF_BYCOMMAND|(effects[i]?MF_CHECKED:MF_UNCHECKED));
+    CheckMenuItem(graphics,base+144,MF_BYCOMMAND|(settings.display_stats?MF_CHECKED:MF_UNCHECKED));
+    CheckMenuItem(graphics,base+111,MF_BYCOMMAND|(settings.sky_light?MF_CHECKED:MF_UNCHECKED));
     CheckMenuItem(graphics,base+110,MF_BYCOMMAND|(settings.dof?MF_CHECKED:MF_UNCHECKED));
     EnableMenuItem(graphics,base+110,MF_BYCOMMAND|(settings.host_3d?MF_ENABLED:MF_GRAYED));
     if(settings.dof && !dof_strength_visible){
@@ -56,6 +61,7 @@ void update_checks() {
         for(int i=0;i<GetMenuItemCount(graphics);++i)if(GetSubMenu(graphics,i)==dof_distance){RemoveMenu(graphics,i,MF_BYPOSITION);break;}
         dof_strength_visible=false;
     }
+    check(shadow_quality,base+140,4,settings.shadow_quality);
     check(dof_strength,base+120,5,settings.dof_strength-1);
     check(dof_distance,base+130,5,settings.dof_distance);
     if(settings.filter==3 && !anisotropic_visible){
@@ -84,12 +90,13 @@ void save() {
     {
         std::ofstream out(temporary, std::ios::trunc);
         out << "# Rage Racer graphics options v1\nscale=" << settings.scale
+            << "\ndisplay_stats=" << settings.display_stats
             << "\naa=" << settings.aa << "\nfilter=" << settings.filter
             << "\ngeometry=" << settings.geometry << "\nperspective=" << settings.perspective
             << "\nseams=" << settings.seams << "\naspect=" << settings.aspect
             << "\nhost_3d=" << settings.host_3d << "\nfps=" << settings.fps
             << "\noriginal_lod=" << settings.original_lod
-            << "\nlod_fade=" << settings.lod_fade << "\nextended_distance=" << settings.extended_distance << "\nanisotropy=" << settings.anisotropy
+            << "\nshadow_quality=" << settings.shadow_quality << "\nsky_light=" << settings.sky_light << "\nlod_fade=" << settings.lod_fade << "\nextended_distance=" << settings.extended_distance << "\nanisotropy=" << settings.anisotropy
             << "\nscanlines=" << settings.scanlines << "\ncrt_texture=" << settings.crt_texture
             << "\ncrt_shading=" << settings.crt_shading << "\ncrt_distortion=" << settings.crt_distortion
             << "\ncolour_grading=" << settings.colour_grading << "\ndof=" << settings.dof << "\ndof_strength=" << settings.dof_strength << "\ndof_distance=" << settings.dof_distance << '\n';
@@ -100,16 +107,17 @@ void save() {
         std::fprintf(stderr, "Rage Racer: could not replace graphics settings (%lu)\n", GetLastError());
 }
 LRESULT CALLBACK menu_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
+    if(message==WM_COMMAND && LOWORD(wparam)==base+201){rage_graphics_menu_pause(1);rage_controllers_show(hwnd);rage_graphics_menu_pause(0);return 0;}
     if(message==WM_COMMAND && LOWORD(wparam)==base+200){
         rage_graphics_menu_pause(1);
-        MessageBoxW(hwnd,L"Rage Racer - PC\nVersion 0.3.22\nBuild: " RAGE_WIDE(__DATE__) L" " RAGE_WIDE(__TIME__)
+        MessageBoxW(hwnd,L"Rage Racer - PC\nVersion 0.3.29\nBuild: " RAGE_WIDE(__DATE__) L" " RAGE_WIDE(__TIME__)
             L"\n\nOriginal Rage Racer game: Namco\nPC adaptation: Rage Racer PC project\nRecompilation framework: PSXRecomp by Matthew Stanley and contributors\nBIOS: OpenBIOS contributors\n\nLibraries and tools:\nSDL 3, libchdr, libwebp, zlib, zstd, miniz, LZMA SDK\nfmt, toml11, Rabbitizer, ELFIO, stb\nOpenGL and the Windows SDK\nAudio: minimp3 by lieff and contributors (CC0)\nMP3 encoding in Generate Data: LAME (LGPL)\nhttps://lame.sourceforge.io/\n\nLocal source contributions:\nRage Racer PC: retained textures, mesh templates and render submission\n\nResearch references:\nkhasinski: Rage Racer Decomp and Rage Racer PC\n\nThank you to the authors and contributors of these projects.\nOriginal game assets remain the property of their respective owners.",
             L"About Rage Racer - PC",MB_OK|MB_ICONINFORMATION);
         rage_graphics_menu_pause(0);return 0;
     }
     if (message == WM_ENTERMENULOOP) rage_graphics_menu_pause(1);
     if (message == WM_EXITMENULOOP) rage_graphics_menu_pause(0);
-    if (message == WM_COMMAND && HIWORD(wparam) == 0 && LOWORD(wparam) >= base && LOWORD(wparam) <= base + 134) {
+    if (message == WM_COMMAND && HIWORD(wparam) == 0 && LOWORD(wparam) >= base && LOWORD(wparam) <= base + 144) {
         std::lock_guard<std::mutex> lock(queue_lock);
         commands.push_back(LOWORD(wparam));
         return 0;
@@ -144,6 +152,7 @@ void rage_graphics_configure(const char* directory) {
         int value;
         if (!(value_stream >> value)) continue;
         if (name == "scale") { for (int scale : scales) if (value == scale) settings.scale = value; }
+        else if (name == "display_stats" && (value==0 || value==1))settings.display_stats=value;
         else if (name == "aa" && value >= 0 && value <= 3) settings.aa = value;
         else if (name == "filter" && value >= 0 && value <= 3) settings.filter = value;
         else if (name == "geometry" && (value == 0 || value == 1)) settings.geometry = value;
@@ -152,6 +161,8 @@ void rage_graphics_configure(const char* directory) {
         else if (name == "aspect" && value >= 0 && value <= 5) settings.aspect = value;
         // Legacy host_3d preferences no longer disable the native renderer.
         else if (name == "anisotropy") {for(int level:anisotropies)if(value==level)settings.anisotropy=value;}
+        else if (name == "shadow_quality" && value>=0 && value<=3)settings.shadow_quality=value;
+        else if (name == "sky_light" && (value==0 || value==1))settings.sky_light=value;
         else if (name == "lod_fade" && (value==0 || value==1))settings.lod_fade=value;
         else if (name == "extended_distance" && (value==0 || value==1))settings.extended_distance=value;
         else if (name == "original_lod" && (value == 0 || value == 1)) settings.original_lod = 0;
@@ -166,8 +177,8 @@ void rage_graphics_configure(const char* directory) {
         else if(name=="dof_distance" && value>=0 && value<=4)settings.dof_distance=value;
     }
     configured = true;
-    if ((settings.host_3d || settings.geometry || settings.perspective || settings.seams) && settings.scale < 2) settings.scale = 2;
     if (settings.seams) settings.geometry = 1;
+    stats_visible.store(settings.display_stats,std::memory_order_relaxed);
     rage_graphics_apply(&settings);
     dirty = false;
     update_checks();
@@ -189,17 +200,21 @@ void rage_graphics_install(SDL_Window* window) {
             L"IDI_ICON1", IMAGE_ICON, width, height, LR_SHARED));
         if (icon) SendMessageW(window_handle, WM_SETICON, size, reinterpret_cast<LPARAM>(icon));
     }
+    rage_controllers_configure(preferences.parent_path().string().c_str());
     bar = CreateMenu(); graphics = CreatePopupMenu(); resolution = CreatePopupMenu();
     aa = CreatePopupMenu(); filtering = CreatePopupMenu(); seams = CreatePopupMenu();
     aspect = CreatePopupMenu();
     motion = CreatePopupMenu();options = CreatePopupMenu();anisotropic=CreatePopupMenu();anisotropic_visible=false;
     filters=CreatePopupMenu();help=CreatePopupMenu();dof_strength=CreatePopupMenu();dof_strength_visible=false;
-    dof_distance=CreatePopupMenu();
+    dof_distance=CreatePopupMenu();shadow_quality=CreatePopupMenu();
+    const wchar_t* shadow_labels[]={L"Off",L"Low",L"Medium",L"High"};
+    for(int i=0;i<4;++i)item(shadow_quality,base+140+i,shadow_labels[i]);
     const wchar_t* distance_labels[]={L"Near",L"Mid-range",L"Far",L"Very far",L"Horizon"};
     for(int i=0;i<5;++i)item(dof_distance,base+130+i,distance_labels[i]);
     const wchar_t* effect_labels[]={L"Scanlines",L"CRT texture",L"CRT shading",L"CRT distortion",L"Colour grading"};
     for(int i=0;i<5;++i)item(filters,base+100+i,effect_labels[i]);
     item(help,base+200,L"About");
+    item(options,base+201,L"Controllers...");
     const wchar_t* strength_labels[]={L"Very subtle",L"Subtle",L"Medium",L"Strong",L"Very strong"};
     for(int i=0;i<5;++i)item(dof_strength,base+120+i,strength_labels[i]);
     const wchar_t* aniso_labels[]={L"1x",L"2x",L"4x",L"8x",L"16x"};
@@ -219,7 +234,7 @@ void rage_graphics_install(SDL_Window* window) {
     item(filtering, base + 22, L"Smooth 3D, sharp interface");
     item(filtering,base+23,L"Anisotropic filtering");
     item(seams, base + 30, L"Off"); item(seams, base + 31, L"Shared vertices (subpixel)"); item(seams, base + 32, L"Original edge alignment");
-    AppendMenuW(graphics, MF_POPUP, reinterpret_cast<UINT_PTR>(resolution), L"3D rendering resolution (restart required)");
+    AppendMenuW(graphics, MF_POPUP, reinterpret_cast<UINT_PTR>(resolution), L"3D rendering resolution");
     AppendMenuW(graphics, MF_POPUP, reinterpret_cast<UINT_PTR>(aa), L"Antialiasing");
     AppendMenuW(graphics, MF_POPUP, reinterpret_cast<UINT_PTR>(filtering), L"Texture filtering");
     AppendMenuW(graphics, MF_POPUP, reinterpret_cast<UINT_PTR>(seams), L"Reduce polygon gaps (2x or higher)");
@@ -230,6 +245,9 @@ void rage_graphics_install(SDL_Window* window) {
     item(graphics, base + 41, L"Compatibility mode: texture correction");
     AppendMenuW(graphics, MF_SEPARATOR, 0, nullptr);
     item(graphics,base+110,L"Depth of field");
+    item(graphics,base+111,L"Use sky as a light source");
+    AppendMenuW(graphics,MF_POPUP,reinterpret_cast<UINT_PTR>(shadow_quality),L"Shadow quality");
+    item(graphics,base+144,L"Display stats");
     item(graphics, base + 50, L"Restore original settings");
     AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(graphics), L"&Graphics");
     AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(options), L"&Options");
@@ -252,8 +270,11 @@ void rage_graphics_tick() {
         else if (id >= base + 30 && id < base + 33) settings.seams = id - base - 30;
         else if (id == base + 40) { settings.geometry = !settings.geometry; if (!settings.geometry) settings.seams = 0; }
         else if (id == base + 41) settings.perspective = !settings.perspective;
-        else if (id == base + 50) { const int original_lod=settings.original_lod, extended_distance=settings.extended_distance, lod_fade=settings.lod_fade;settings = RageGraphicsSettings{}; settings.fps = -1;settings.original_lod=original_lod;settings.extended_distance=extended_distance;settings.lod_fade=lod_fade; }
+        else if (id == base + 50) { const int original_lod=settings.original_lod, extended_distance=settings.extended_distance, lod_fade=settings.lod_fade;settings = RageGraphicsSettings{}; settings.sky_light=0;settings.fps = -1;settings.original_lod=original_lod;settings.extended_distance=extended_distance;settings.lod_fade=lod_fade; }
         else if (id >= base + 60 && id < base + 66) settings.aspect = id - base - 60;
+        else if(id==base+144)settings.display_stats=!settings.display_stats;
+        else if(id>=base+140 && id<base+144)settings.shadow_quality=id-base-140;
+        else if (id == base+111)settings.sky_light=!settings.sky_light;
         else if (id == base+82)settings.lod_fade=!settings.lod_fade;
         else if (id == base+81)settings.extended_distance=!settings.extended_distance;
         else if (id >= base+90 && id < base+95)settings.anisotropy=anisotropies[id-base-90];
@@ -268,14 +289,16 @@ void rage_graphics_tick() {
         else if(id>=base+120 && id<=base+124)settings.dof_strength=id-base-119;
         else if(id>=base+130 && id<=base+134)settings.dof_distance=id-base-130;
         else continue;
-        if ((settings.host_3d || settings.seams || settings.geometry || settings.perspective) && settings.scale < 2) settings.scale = 2;
         if (settings.seams) settings.geometry = 1;
         dirty = true;
     }
     if (dirty) {
-        rage_graphics_apply(&settings);
+        stats_visible.store(settings.display_stats,std::memory_order_relaxed);
+    rage_graphics_apply(&settings);
         if (!pending.empty()) save();
         update_checks();
         dirty = false;
     }
 }
+
+extern "C" int rage_stats_enabled(){return stats_visible.load(std::memory_order_relaxed);}

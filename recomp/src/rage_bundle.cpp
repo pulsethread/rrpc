@@ -16,6 +16,8 @@
 #include <regex>
 #include <cstdlib>
 namespace fs = std::filesystem;
+static std::string rage_verified_disc;
+const char* rage_bundle_disc_path(){return rage_verified_disc.c_str();}
 namespace {
 struct Hash {
     BCRYPT_ALG_HANDLE alg{}; BCRYPT_HASH_HANDLE hash{};
@@ -151,9 +153,11 @@ int rage_bundle_prepare(int& argc, char**& argv) {
                 original_executable=cache/relative;
                 config_line="exe = \""+(cache/relative).generic_u8string()+"\"";exe_found=true;
             }
+            if(game_section && std::regex_match(config_line,std::regex(R"(^\s*players\s*=.*$)")))config_line="players = 2";
             config_output<<config_line<<'\n';
         }
         if(!exe_found)throw std::runtime_error("Bundle config is missing its game executable");
+        rage_verified_disc=(cache/"disc/game.cue").string();
         const fs::path runtime_config=cache/"runtime-game.toml";
         {std::ofstream prepared(runtime_config,std::ios::binary);prepared<<config_output.str();prepared.close();
          if(!prepared)throw std::runtime_error("Cannot prepare local game configuration");}

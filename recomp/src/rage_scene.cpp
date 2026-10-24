@@ -9,6 +9,7 @@
 #include "rage_actor_clip.h"
 #include "pgxp_hooks.h"
 #include <array>
+#include <algorithm>
 #include <cstdio>
 #include <atomic>
 #include <cmath>
@@ -40,7 +41,7 @@ struct Node {
 };
 struct CarLightHistory {uint32_t tick=~0u;RageCarLightState state{};};
 std::unordered_map<uint32_t,CarLightHistory> car_lights;
-struct PlayerLightSnapshot {uint32_t tick=~0u;RageSceneVertex pose{};RageCarLightReceipt lamps{};};
+struct PlayerLightSnapshot {uint32_t tick=~0u;RageSceneVertex pose{};RageCarLightReceipt lamps{};float top[6]{},horizon[6]{};bool sky_history=false,sky_valid=false;};
 std::mutex player_light_mutex;
 PlayerLightSnapshot player_light_snapshots[16];uint32_t player_light_tick=~0u;
 bool enabled=false;
@@ -118,6 +119,14 @@ extern "C" void rage_scene_lights_capture(CPUState* cpu,uint32_t frame){
     if(frame<player_light_tick)for(auto& old:player_light_snapshots)old={};
     player_light_tick=frame;
     PlayerLightSnapshot snapshot;snapshot.tick=frame;
+    if(guest_word(0x801e42e4)==12){
+        const auto base=rage_region_address(0x801e3fb4);
+        for(int k=0;k<3;++k){snapshot.top[k+3]=guest_byte(base+14+k)/255.f;snapshot.horizon[k+3]=guest_byte(base+38+k)/255.f;}
+        memcpy(snapshot.top,snapshot.top+3,12);memcpy(snapshot.horizon,snapshot.horizon+3,12);snapshot.sky_valid=true;
+        const auto& old=player_light_snapshots[previous_tick&15];
+        if(frame>previous_tick && frame-previous_tick<=4 && old.tick==previous_tick && old.sky_valid){
+            memcpy(snapshot.top,old.top+3,12);memcpy(snapshot.horizon,old.horizon+3,12);snapshot.sky_history=true;}
+    }
     const uint32_t car=rage_region_address(0x8009e6d4)&0x1fffffffu;
     snapshot.lamps=car_light_receipt(car,true,0,frame);
     if(snapshot.lamps.entity){
@@ -144,6 +153,14 @@ extern "C" int rage_scene_player_light(uint32_t frame,float phase,RageCarLightPo
     {std::lock_guard<std::mutex> lock(player_light_mutex);snapshot=player_light_snapshots[frame&15];}
     if(snapshot.tick!=frame || !snapshot.lamps.entity)return 0;
     out->lamps=snapshot.lamps;native_matrix(snapshot.pose,phase,out->world);return 1;
+}
+extern "C" int rage_scene_environment_light(uint32_t frame,float phase,RageEnvironmentLight* out){
+    if(!out)return 0;PlayerLightSnapshot snapshot;
+    {std::lock_guard<std::mutex> lock(player_light_mutex);snapshot=player_light_snapshots[frame&15];}
+    if(snapshot.tick!=frame || !snapshot.sky_valid)return 0;
+    const float t=snapshot.sky_history?std::clamp(phase,0.f,1.f):1.f;float top[3],horizon[3];
+    for(int k=0;k<3;++k){top[k]=snapshot.top[k]*(1-t)+snapshot.top[k+3]*t;horizon[k]=snapshot.horizon[k]*(1-t)+snapshot.horizon[k+3]*t;}
+    rage_environment_light(top,horizon,out);return 1;
 }
 extern "C" void rage_scene_set_original_lod(int on){original_lod.store(0,std::memory_order_relaxed);}
 extern "C" int rage_scene_original_lod(){return original_lod.load(std::memory_order_relaxed);}

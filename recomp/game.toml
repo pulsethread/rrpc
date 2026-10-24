@@ -4,7 +4,7 @@
 [game]
 name = "Rage Racer"
 id = "SCES-00650"
-players = 1
+players = 2
 exe = "../data/disc/SCES_006.50"
 disc = "../../Source/Rage Racer (Europe).cue"
 load_address = "0x80010000"

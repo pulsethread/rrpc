@@ -1,3 +1,17 @@
+# Release 0.3.29
+
+Improves Free Run road handling, menus and rendering stability, with multiplayer menu and controller setup foundations.
+
+- Reduce normal draw distance to 106496 units, midway between the original and previous distances; keep shadow coverage aligned.
+- Restore authored jumps using the current route and direction, while retaining Free Run road and junction collision fixes.
+- Restore the original smooth race fade and accelerate confirmed Free Run data loading. Required asset initialization still takes a few seconds.
+- Include updated menu graphics, multiplayer mode and dual car selection, controller configuration, route visibility, sky lighting and shadow settings, live render-resolution changes, and the optional performance statistics overlay.
+- Preserve game data, saves, settings, music and mods. Multiplayer gameplay is still under development.
+
+Extract `RageRacer-PC-v0.3.29.zip` into the existing game folder, replacing the supplied program files. Keep your existing `data.dat`. No original game data is included.
+
+Validation: all 21 native tests passed, including all 28 authored crest events across the three routes and both directions. A controller-driven Free Run lap, positive jump check and 168-sample GPU probe passed. Confirmed-load timing in the diagnostic run improved from 7.99 to 5.82 seconds; timing varies by system.
+
 # Release 0.3.28
 
 Fixes shoulder buttons showing through the PlayStation digital-controller models on the Multiplayer screen.
@@ -49,7 +63,7 @@ For a new installation, run `Generate Data.exe` with a supported original disc o
 
 All 17 native tests passed. Full-lap comparisons, high-quality rendering, replay and Free run location checks passed, with zero failures in the 162-check GPU probe and no recorded graphics errors. Existing saves, game data and graphics preferences were verified unchanged.
 
-Two matched local full-lap comparisons showed approximately 8â€“19% lower process CPU use and higher frame throughput. Results varied substantially between runs; these are measurements on the test machine, not a guaranteed FPS increase. No visual settings or draw distances were reduced.
+Two matched local full-lap comparisons showed approximately 8–19% lower process CPU use and higher frame throughput. Results varied substantially between runs; these are measurements on the test machine, not a guaranteed FPS increase. No visual settings or draw distances were reduced.
 
 # Release 0.3.25
 

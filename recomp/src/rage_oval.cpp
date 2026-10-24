@@ -164,6 +164,7 @@ extern "C" const uint16_t* rage_oval_texture_pixels(){return pixels.empty()?null
 // The donor course closes exits that belong to a different racing route.
 // Remove only added raised geometry inside the active course's lane corridor;
 // shared surfaces and the active course's own barriers remain authoritative.
+static std::vector<Quad> free_closure_boards,free_closure_rails;
 static bool blocks_route(const Quad& face,const std::vector<RageTrackRoutePoint>& route){
  if(route.size()<2)return false;
  // Sloping road decks are drivable surfaces, not route-blocking walls.
@@ -196,6 +197,58 @@ static bool blocks_route(const Quad& face,const std::vector<RageTrackRoutePoint>
  }
  return false;
 }
+// These two authored tiles look similar geometrically, but serve different
+// purposes. Match atlas identity independently of lighting CLUT and bank.
+static bool free_road_tile(const RageTrackFace& face,unsigned left,unsigned right,unsigned top=96,unsigned bottom=111){
+ if((face.page&0x1ff)!=0x15)return false;
+ for(auto uv:face.uv)if((uv&255)<left || (uv&255)>right || ((uv>>8)&255)<top || ((uv>>8)&255)>bottom)return false;
+ return true;
+}
+static bool free_metal_rail(const RageTrackFace& face,const Quad& quad){
+ if((face.page&0x1ff)!=0x16)return false;
+ for(auto uv:face.uv)if((uv&255)>127 || ((uv>>8)&255)>31)return false;
+ double high=-1e30;for(auto p:quad)high=std::max(high,p[1]);
+ const int order[]={0,1,3,2};int first=0,last=1;double length=0;
+ for(int k=0;k<4;++k){const int a=order[k],b=order[(k+1)%4];const double span=std::hypot(quad[b][0]-quad[a][0],quad[b][2]-quad[a][2]);if(span>length){length=span;first=a;last=b;}}
+ const double dx=quad[last][0]-quad[first][0],dz=quad[last][2]-quad[first][2];
+ if(length<64)return false;
+ const double nx=-dz/length,nz=dx/length;
+ // A road-closing rail has drivable pavement on BOTH sides. Exterior
+ // guardrails fail the outward sample, even where the road curves.
+ for(int i=1;i<8;++i){double t=i/8.,x=quad[first][0]+dx*t,z=quad[first][2]+dz*t;
+  if(rage_free_world_road_contains(x+nx*128,high,z+nz*128,16) && rage_free_world_road_contains(x-nx*128,high,z-nz*128,16))return true;
+ }
+ return false;
+}
+static double closure_edge_distance(const Quad& a,const Quad& b){
+ double best=1e30;const int order[]={0,1,3,2};
+ for(auto p:a)for(int k=0;k<4;++k){auto q=b[order[k]],r=b[order[(k+1)%4]];double dx=r[0]-q[0],dz=r[2]-q[2],nn=dx*dx+dz*dz;
+  const double t=nn>0?std::clamp(((p[0]-q[0])*dx+(p[2]-q[2])*dz)/nn,0.,1.):0;
+  best=std::min(best,std::hypot(p[0]-q[0]-t*dx,p[2]-q[2]-t*dz));
+ }return best;
+}
+static bool free_closure_post(const RageTrackFace& face,const Quad& quad){
+ if(!free_road_tile(face,0,31,0,95))return false;
+ double lo[3]={1e30,1e30,1e30},hi[3]={-1e30,-1e30,-1e30};
+ for(auto p:quad)for(int j=0;j<3;++j){lo[j]=std::min(lo[j],p[j]);hi[j]=std::max(hi[j],p[j]);}
+ if(std::max(hi[0]-lo[0],hi[2]-lo[2])>96 || hi[1]-lo[1]>4096)return false;
+ for(const auto& collection:{&free_closure_boards,&free_closure_rails})for(const auto& board:*collection){double low=1e30,high=-1e30;for(auto p:board){low=std::min(low,p[1]);high=std::max(high,p[1]);}
+  if(high<lo[1]-32 || low>hi[1]+32)continue;
+  if(closure_edge_distance(quad,board)<=256)return true;
+ }
+ return false;
+}
+static bool free_tunnel_cap(const RageTrackFace& face){
+ if((face.page&0x1ff)!=0x16)return false;
+ for(auto uv:face.uv)if((uv&255)<64 || (uv&255)>95 || ((uv>>8)&255)<16 || ((uv>>8)&255)>47)return false;
+ return true;
+}
+static bool free_world_omit(const RageTrackFace& face,const Quad& quad,const std::vector<RageTrackRoutePoint>&){
+ if(free_tunnel_cap(face))return true; // Tunnel-end blackout and its rim.
+ if(free_road_tile(face,160,191) || free_metal_rail(face,quad))return true;
+ // Other wall materials, especially the yellow/black dividers, stay.
+ return free_closure_post(face,quad);
+}
 
 bool rage_oval_extend(const RageTrackCourse& active,RageTrackCourse& drawing){
  if(oval.faces.empty() || pixels.empty() || std::getenv("RAGE_DISABLE_OVAL"))return false;
@@ -203,10 +256,10 @@ bool rage_oval_extend(const RageTrackCourse& active,RageTrackCourse& drawing){
  std::map<Point,unsigned> votes;for(const auto& f:oval.faces){Point p;auto k=shape(oval,f,p);auto it=shapes.find(k);if(it==shapes.end() || it->second.size()>8)continue;for(auto q:it->second){for(int j=0;j<3;++j)q[j]-=p[j];++votes[q];}}
  Point shift{};unsigned best=0;for(const auto& v:votes)if(v.second>best){best=v.second;shift=v.first;}if(merging_world){shift=merge_shift;best=500;}
  if(best<500)return false;
- std::set<Key> exactByLayer[2];std::vector<Surface> existing;std::vector<unsigned> existingLayers;
+ std::set<Key> exactByLayer[2];std::vector<Surface> existing;std::vector<unsigned> existingLayers,existingFaces;std::map<Key,std::vector<unsigned>> exactOwners[2];
  // Use authored triangles, before active topology splits, for stable surface
  // identity across T-junction repair. The racing course always wins overlaps.
- for(const auto& f:active.faces)for(const auto& t:corners){Key p;for(int k=0;k<3;++k)p[k]=point(active,f.vertex[t[k]]);exactByLayer[merging_world && f.free_run_later].insert(key(p[0],p[1],p[2]));Surface s;if(surface(p,s)){existing.push_back(s);existingLayers.push_back(merging_world && f.free_run_later);}}
+ for(const auto& f:active.faces)for(const auto& t:corners){const unsigned fi=unsigned(&f-active.faces.data()),layer=merging_world && f.free_run_later;Key p;for(int k=0;k<3;++k)p[k]=point(active,f.vertex[t[k]]);exactByLayer[merging_world && f.free_run_later].insert(key(p[0],p[1],p[2]));exactOwners[layer][key(p[0],p[1],p[2])].push_back(fi);Surface s;if(surface(p,s)){existing.push_back(s);existingLayers.push_back(layer);existingFaces.push_back(fi);}}
  std::map<std::pair<int,int>,std::vector<unsigned>> surface_cells;
  for(unsigned i=0;i<existing.size();++i){const auto& e=existing[i];
   for(int z=int(std::floor(e.lo[2]/8192));z<=int(std::floor(e.hi[2]/8192));++z)
@@ -218,9 +271,9 @@ bool rage_oval_extend(const RageTrackCourse& active,RageTrackCourse& drawing){
   const auto& exact=exactByLayer[visibilityLayer];
   Quad aligned;bool missing=false;for(int k=0;k<4;++k){aligned[k]=point(oval,f.vertex[k]);for(int j=0;j<3;++j)aligned[k][j]+=shift[j];}
   for(const auto& t:corners)missing|=!exact.count(key(aligned[t[0]],aligned[t[1]],aligned[t[2]]));
-  if(missing && blocks_route(aligned,active.route)){++barriers;continue;}
+  if(merging_world?free_world_omit(f,aligned,active.route):(missing && blocks_route(aligned,active.route))){++barriers;continue;}
   RageTrackSector sector{};sector.first=(uint32_t)drawing.faces.size();for(int j=0;j<3;++j){sector.lo[j]=1e30f;sector.hi[j]=-1e30f;}
-  for(const auto& t:corners){Polygon poly;Key original;for(int k=0;k<3;++k){Point p=point(oval,f.vertex[t[k]]);for(int j=0;j<3;++j)p[j]+=shift[j];original[k]=p;poly.push_back({p,double(f.uv[t[k]]&255),double((f.uv[t[k]]>>8)&255)});}auto canonical=key(original[0],original[1],original[2]);if(exact.count(canonical)){++shared;continue;}Surface test;if(!surface(original,test))continue;
+  for(const auto& t:corners){Polygon poly;Key original;for(int k=0;k<3;++k){Point p=point(oval,f.vertex[t[k]]);for(int j=0;j<3;++j)p[j]+=shift[j];original[k]=p;poly.push_back({p,double(f.uv[t[k]]&255),double((f.uv[t[k]]>>8)&255)});}auto canonical=key(original[0],original[1],original[2]);if(exact.count(canonical)){if(merging_world)for(unsigned owner:exactOwners[visibilityLayer][canonical])drawing.faces[owner].free_run_routes|=f.free_run_routes;++shared;continue;}Surface test;if(!surface(original,test))continue;
    std::vector<Polygon> pieces{poly};
    // Recheck each resulting piece: a large sloped face may only become
    // coplanar with a neighbouring receiver after an earlier clip.
@@ -237,6 +290,7 @@ bool rage_oval_extend(const RageTrackCourse& active,RageTrackCourse& drawing){
      bool disjoint=false;
      if(coplanar)for(int j=0;j<3;++j)if(j!=s.axis){double lo=piece[0].p[j],hi=lo,sl=s.p[0][j],sh=sl;for(const auto& v:piece){lo=std::min(lo,v.p[j]);hi=std::max(hi,v.p[j]);}for(int k=1;k<3;++k){sl=std::min(sl,s.p[k][j]);sh=std::max(sh,s.p[k][j]);}disjoint|=hi<=sl || sh<=lo;}
      if(!coplanar || disjoint){next.push_back(std::move(piece));continue;}
+     if(merging_world)drawing.faces[existingFaces[receiver]].free_run_routes|=f.free_run_routes;
      auto result=subtract(piece,s);for(auto& r:result)next.push_back(std::move(r));
     }
     pieces=std::move(next);if(pieces.empty())break;
@@ -258,7 +312,7 @@ bool rage_oval_extend(const RageTrackCourse& active,RageTrackCourse& drawing){
  }
  const unsigned seam_repairs=added?rage_track_stitch_geometry(drawing):0;
  // An Oval race already contains its own environment. Do not append it twice.
- if((!merging_world && shared>oval.faces.size()*1.8) || !added){drawing={};return false;}
+ if((!merging_world && shared>oval.faces.size()*1.8) || (!added && !merging_world)){drawing={};return false;}
  std::printf("Oval scenery: alignment %.0f,%.0f,%.0f (%u votes), %zu shared, %zu added, %zu clipped, %zu route barriers omitted, %u seam repairs\n",shift[0],shift[1],shift[2],best,shared,added,clipped,barriers,seam_repairs);return true;
 }
 
@@ -308,6 +362,7 @@ void assign_world_banks(RageTrackCourse& mesh,const Bytes& pack,unsigned source,
   }
   const int section=int(progress)>>8;const unsigned bank=section>=lo && section<hi?1:0;
   f.page=uint16_t(f.page&0x1ff)|uint16_t((source+bank)<<9);
+  f.free_run_routes=1u<<(((source-2)/2)%4);
   f.free_run_later=band && nearest>(*band)[1] && nearest<(*band)[2] && !near_lower;
  }
 }
@@ -316,7 +371,8 @@ void assign_world_banks(RageTrackCourse& mesh,const Bytes& pack,unsigned source,
 bool rage_free_world_build(const RageTrackCourse& active,RageTrackCourse& drawing,unsigned variant,unsigned kind){
  if(variant>=6 || kind>=4 || active.faces.empty())return false;
  try{
-  std::array<RageTrackCourse*,4> donors{};RageFreeRoutes routes;
+  std::array<RageTrackCourse*,4> donors{};RageFreeRoutes routes,events;
+  free_closure_boards.clear();free_closure_rails.clear();
   std::array<std::array<float,3>,4> shifts{};
   std::vector<RageTrackRoutePoint> corridors;
   std::map<Quad,std::vector<Point>> reference;
@@ -343,6 +399,7 @@ bool rage_free_world_build(const RageTrackCourse& active,RageTrackCourse& drawin
    if(best<500)throw std::runtime_error("Free run alignment lacks shared geometry");
    for(int j=0;j<3;++j)shifts[r][j]=float(shift[j]);
    const auto offsets=chunks(free_packs[id]);routes[r]=Bytes(free_packs[id].begin()+offsets[4],free_packs[id].begin()+offsets[5]);
+   events[r]=Bytes(free_packs[id].begin()+offsets[9],free_packs[id].begin()+offsets[10]);
    const auto count=u32(routes[r],0);if(count<16 || count>4096 || 4+count*24>routes[r].size())throw std::runtime_error("Free run road table");
    std::vector<RageTrackRoutePoint> route;
    for(unsigned i=0;i<count;++i){const size_t p=4+24*i;
@@ -352,6 +409,15 @@ bool rage_free_world_build(const RageTrackCourse& active,RageTrackCourse& drawin
    // Explicit closure prevents invented road links between different rings.
    corridors.insert(corridors.end(),route.begin(),route.end());corridors.push_back(route.front());corridors.push_back({0,0,0,0,0});
   }
+  // Collect the complete closure assemblies in aligned world coordinates.
+  for(unsigned r=0;r<4;++r)for(const auto& face:donors[r]->faces)if(free_road_tile(face,160,191)){
+   Quad board;for(int k=0;k<4;++k){board[k]=point(*donors[r],face.vertex[k]);for(int j=0;j<3;++j)board[k][j]+=shifts[r][j];}free_closure_boards.push_back(board);
+  }
+  rage_free_world_routes(routes,shifts);rage_free_world_crest_data(events);
+  for(unsigned r=0;r<4;++r)for(const auto& face:donors[r]->faces){Quad rail;
+   for(int k=0;k<4;++k){rail[k]=point(*donors[r],face.vertex[k]);for(int j=0;j<3;++j)rail[k][j]+=shifts[r][j];}
+   if(free_metal_rail(face,rail))free_closure_rails.push_back(rail);
+  }
   merging_world=true;
   drawing=active;
   assign_world_banks(drawing,free_packs[variant*4+kind],2+variant*8+kind*2,kind<3?&rage_free_tunnel_bands[kind]:nullptr);
@@ -360,7 +426,7 @@ bool rage_free_world_build(const RageTrackCourse& active,RageTrackCourse& drawin
   for(const auto& original:active.sectors){auto sector=original;sector.first=uint32_t(drawing.faces.size());sector.draw_order.clear();
    for(uint32_t i=original.first;i<original.first+original.count;++i){const auto& old=active.faces[i];Quad q;
     for(int k=0;k<4;++k)q[k]=point(active,old.vertex[k]);
-    if(blocks_route(q,corridors)){++removed;continue;}
+    if(free_world_omit(old,q,corridors)){++removed;continue;}
     auto face=textured_faces[i];face.first_triangle=uint32_t(drawing.triangles.size());
     drawing.faces.push_back(face);
     for(unsigned t=0;t<old.triangle_count;++t)drawing.triangles.push_back(active.triangles.at(old.first_triangle+t));
@@ -379,8 +445,7 @@ bool rage_free_world_build(const RageTrackCourse& active,RageTrackCourse& drawin
   }
   merging_world=false;
   rage_track_classify_layers(drawing);rage_track_conform_details(drawing);
-  rage_free_world_routes(routes,shifts);
   std::printf("Free run world: four aligned road networks, %zu faces, %zu triangles; %zu active-route barriers removed\n",drawing.faces.size(),drawing.triangles.size(),removed);
   return true;
- }catch(const std::exception& e){merging_world=false;drawing={};std::fprintf(stderr,"Free run world unavailable: %s\n",e.what());return false;}
+ }catch(const std::exception& e){merging_world=false;rage_free_world_reset();drawing={};std::fprintf(stderr,"Free run world unavailable: %s\n",e.what());return false;}
 }

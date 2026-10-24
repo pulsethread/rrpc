@@ -24,3 +24,12 @@ struct RageMusicConfirmation {
         return confirmed;
     }
 };
+
+// Let the stock ROUND setup (frame1) and display enable (frame15) run
+// before accelerating the timer. Confirmation remains latched meanwhile.
+inline uint32_t rage_music_round_timer(uint32_t timer,bool confirmed,bool chime_played=true){
+    if(!confirmed && timer>119)return 119;
+    if(confirmed && timer>=15 && !chime_played)return 31;
+    if(confirmed && timer>=15 && timer<120)return 120;
+    return timer;
+}

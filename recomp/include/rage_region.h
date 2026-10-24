@@ -8,6 +8,18 @@ inline void rage_region_select(const char* id) {
         (!std::strcmp(id,"SLUS-00403") || !std::strcmp(id,"SLUS_004.03"))?2:0;
 }
 inline constexpr uint32_t rage_region_addresses[][3]={
+{0x801e3fb4u,0x801e3744u,0x801e3cbcu}, // g_EnvironmentColors (packed: slots start at +2)
+{0x80039184u,0x80038b6cu,0x80038ef0u}, // GetCarCrestTrigger
+{0x8003351cu,0x80032f14u,0x80033260u}, // DrawTachometer
+{0x8003d6f0u,0x8003d080u,0x8003d404u}, // DrawAnimatedScenery
+{0x801e4dacu,0x801e4538u,0x801e4ab4u}, // g_GrandPrixMode (halfword)
+{0x800489acu,0x8004833cu,0x800486c0u}, // menu row highlights
+
+{0x80053730u,0x80053078u,0x80053444u}, // UpdateCourseSelectScreen
+{0x8005290cu,0x80052254u,0x80052620u}, // DrawCourseSelectScreen
+{0x8005194cu,0x80051294u,0x80051660u}, // DrawMenuCourseView
+{0x8009b338u,0x8009aac8u,0x8009b040u}, // course menu state
+
 {0x801f1854u,0x801f2c00u,0x801f317cu},
 {0x8009e698u,0x8009de28u,0x8009e3a0u},
 {0x8009e6d4u,0x8009de64u,0x8009e3dcu},
@@ -22,6 +34,8 @@ inline constexpr uint32_t rage_region_addresses[][3]={
 {0x80016754u,0x800165c8u,0x8001672cu},
 {0x8001cd54u,0x8001cbc0u,0x8001cd24u},
 {0x8001cfb4u,0x8001ce20u,0x8001cf84u},
+{0x8005d6ecu,0x8005d034u,0x8005d400u}, // PlaySoundCue
+{0x8001d03cu,0x8001cea8u,0x8001d00cu}, // ROUND cue return
 {0x8007f5b0u,0x8007ee30u,0x8007f2b8u},
 {0x8009afd4u,0x8009a764u,0x8009acdcu},
 {0x801e40a8u,0x801e3838u,0x801e3db0u},
@@ -88,7 +102,9 @@ inline constexpr uint32_t rage_region_addresses[][3]={
 {0x801e4138u,0x801e38c8u,0x801e3e40u},
 {0x801e4facu,0x801e4738u,0x801e4cb4u},
 {0x8007fc68u,0x8007f4e8u,0x8007f970u},
-{0x8001c974u,0x8001c7dcu,0x8001c944u},
+{0x8001c974u,0x8001c7e0u,0x8001c944u},
+{0x80046a2cu,0x800463bcu,0x80046740u}, // DrawSprite
+{0x80016b7cu,0x800169f0u,0x80016b54u}, // DrawText
 {0x8019c8fcu,0x8019bfa4u,0x8019c604u},
 {0x80021d68u,0x80021b84u,0x80021d38u},
 {0x80022068u,0x80021e84u,0x80022038u},

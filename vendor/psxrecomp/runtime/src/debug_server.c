@@ -5322,6 +5322,17 @@ static void handle_write_ram(int id, const char *json)
     if (!json_get_str(json, "addr", addr_str, sizeof(addr_str))) {
         send_err(id, "missing addr"); return;
     }
+    /* One bounded RAM block lets diagnostics update a complete pose without
+     * physics running between its component byte writes. */
+    char block[2049];
+    if (json_get_str(json,"hex",block,sizeof(block))) {
+        const uint32_t addr=hex_to_u32(addr_str),physical=addr&0x1fffffffu;
+        const size_t length=strlen(block);
+        if(!length || (length&1) || physical>=psx_ram_live_bytes() || length/2>psx_ram_live_bytes()-physical){send_err(id,"invalid RAM block");return;}
+        for(size_t i=0;i<length;++i)if(!((block[i]>='0'&&block[i]<='9')||(block[i]>='a'&&block[i]<='f')||(block[i]>='A'&&block[i]<='F'))){send_err(id,"invalid hex");return;}
+        for(size_t i=0;i<length;i+=2){char byte[3]={block[i],block[i+1],0};psx_host_write_byte(addr+(uint32_t)(i/2),(uint8_t)hex_to_u32(byte));}
+        send_ok(id);return;
+    }
     if (!json_get_str(json, "val", val_str, sizeof(val_str))) {
         send_err(id, "missing val"); return;
     }
@@ -10707,7 +10718,7 @@ static void handle_render_thread(int id, const char *json)
 #ifdef RAGE_GRAPHICS_OPTIONS
 static void handle_native_material_probe(int id,const char* json) {
     (void)json;const int failures=gl_renderer_native_material_probe();
-    send_fmt("{\"id\":%d,\"ok\":%s,\"samples\":162,\"failures\":%d}",id,failures==0?"true":"false",failures);
+    send_fmt("{\"id\":%d,\"ok\":%s,\"samples\":168,\"failures\":%d}",id,failures==0?"true":"false",failures);
 }
 #endif
 static void handle_frame_gen(int id, const char *json)
@@ -10761,6 +10772,12 @@ static void handle_frame_gen(int id, const char *json)
     const size_t used=strlen(buf);snprintf(buf+used,sizeof buf-used,",\"sky_packets\":%llu,\"sky_triangles\":%llu,\"view_depth_clears\":%llu",
         (unsigned long long)sky_packets,(unsigned long long)sky_triangles,(unsigned long long)gl_renderer_native_view_clear_count());
     uint64_t native_uploads=0,native_hits=0,native_draws=0,native_camera=0;gl_renderer_native_scene_stats(&native_uploads,&native_hits,&native_draws,&native_camera);
+    extern void gl_renderer_stream_reuse_stats(uint64_t out[2]);
+    {uint64_t reused[2];gl_renderer_stream_reuse_stats(reused);const size_t n=strlen(buf);
+        snprintf(buf+n,sizeof buf-n,",\"terrain_stream_reuses\":%llu,\"terrain_stream_saved_bytes\":%llu",(unsigned long long)reused[0],(unsigned long long)reused[1]);}
+    extern void gl_renderer_shadow_lifetime_stats(uint64_t out[3]);
+    {uint64_t life[3];gl_renderer_shadow_lifetime_stats(life);const size_t n=strlen(buf);
+        snprintf(buf+n,sizeof buf-n,",\"shadow_frame_clears\":%llu,\"shadow_frame_appends\":%llu,\"shadow_frame_reuses\":%llu",(unsigned long long)life[0],(unsigned long long)life[1],(unsigned long long)life[2]);}
     extern void gl_renderer_native_efficiency(uint64_t out[5]);
     extern void gl_renderer_native_queue_efficiency(uint64_t out[5]);
     extern void gl_renderer_retained_terrain_stats(uint64_t out[5]);
@@ -10778,9 +10795,11 @@ static void handle_frame_gen(int id, const char *json)
             (unsigned long long)q[0],(unsigned long long)q[1],(unsigned long long)q[2],(unsigned long long)q[3],(unsigned long long)q[4]);}
     uint64_t efficiency[5];gl_renderer_native_efficiency(efficiency);
     extern void gl_renderer_vehicle_shadow_stats(uint64_t out[3]);uint64_t shadows[3];gl_renderer_vehicle_shadow_stats(shadows);
+    extern void gl_renderer_environment_shadow_stats(uint64_t out[3]);uint64_t environment_shadows[3];gl_renderer_environment_shadow_stats(environment_shadows);
     {size_t used=strlen(buf);snprintf(buf+used,sizeof buf-used,",\"vehicle_shadow_maps\":%llu,\"vehicle_shadow_casters\":%llu,\"vehicle_shadow_receivers\":%llu",(unsigned long long)shadows[0],(unsigned long long)shadows[1],(unsigned long long)shadows[2]);}
     {const size_t n=strlen(buf);snprintf(buf+n,sizeof buf-n,",\"geometry_source_bytes\":%llu,\"geometry_upload_bytes\":%llu,\"indexed_uploads\":%llu,\"terrain_batch_records\":%llu,\"terrain_batch_triangles\":%llu",
         (unsigned long long)efficiency[0],(unsigned long long)efficiency[1],(unsigned long long)efficiency[2],(unsigned long long)efficiency[3],(unsigned long long)efficiency[4]);}
+    {const size_t n=strlen(buf);snprintf(buf+n,sizeof buf-n,",\"environment_shadow_maps\":%llu,\"environment_shadow_casters\":%llu,\"environment_lit_groups\":%llu",(unsigned long long)environment_shadows[0],(unsigned long long)environment_shadows[1],(unsigned long long)environment_shadows[2]);}
     uint64_t materials=0,material_triangles=0,invalidated=0;gl_renderer_scene_material_stats(&materials,&material_triangles,&invalidated);
     send_fmt("{\"id\":%d,\"ok\":true,\"track_loads\":%llu,\"track_vertices\":%llu,\"track_faces\":%llu,\"track_draws\":%llu,\"track_triangles\":%llu,\"track_packets_replaced\":%llu,\"track_errors\":%llu,\"native_mesh_uploads\":%llu,\"native_mesh_reuses\":%llu,\"native_scene_draws\":%llu,\"native_camera_placements\":%llu,\"material_decodes\":%llu,\"material_triangles\":%llu,\"material_invalidations\":%llu,\"scene_poses\":%llu,\"wheel_poses\":%llu,\"scene_paired\":%llu,\"host_3d\":%d,\"projected_polygons\":%llu,\"fallback_polygons\":%llu,%s}",
         id,(unsigned long long)tl,(unsigned long long)tv,(unsigned long long)tf,(unsigned long long)td,

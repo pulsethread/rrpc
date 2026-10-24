@@ -3,6 +3,9 @@
 #include <string.h>
 /* Adapted from the reference render_shadow.c. Coordinates here are PSX
  * vertex units (four per game-world unit), with Y down and Z forward. */
+/* Shadow maps belong to a scene frame, not an individual queue flush.
+ * No-caster flushes reuse; later caster flushes append without clearing. */
+static inline int rage_shadow_update_plan(int valid,int has_casters){return !has_casters?0:valid?2:1;}
 static inline float rage_shadow_dot(const float a[3],const float b[3]) {
     return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
 }
@@ -23,13 +26,16 @@ static inline int rage_shadow_camera_inverse(const float rows[12],const float or
     for(int y=0;y<3;++y){for(int x=0;x<3;++x)out[4*y+x]=r[3*y+x];out[4*y+3]=origin[y];}
     return 1;
 }
-static inline int rage_vehicle_shadow_map(const float center[3],float out[12]) {
-    const float extent=16384.f,resolution=4096.f;
-    const float raw[3]={-.34f,-1.f,-.42f};float light[3],right[3],vertical[3],snapped[3];
+static inline int rage_shadow_resolution(int quality){return quality<=0?0:quality==1?2048:quality==2?4096:8192;}
+static inline int rage_directional_shadow_map_grid(const float center[3],const float raw[3],float extent,float resolution,float out[12]) {
+    if(!isfinite(extent) || extent<1.f || !isfinite(resolution) || resolution<1.f)return 0;
+    float light[3],right[3],vertical[3],snapped[3];
     const float length=sqrtf(rage_shadow_dot(raw,raw));
+    if(!isfinite(length) || length<.000001f)return 0;
     for(int k=0;k<3;++k){if(!isfinite(center[k]))return 0;light[k]=raw[k]/length;snapped[k]=center[k];}
     right[0]=-light[2];right[1]=0;right[2]=light[0];
-    const float rl=sqrtf(rage_shadow_dot(right,right));for(int k=0;k<3;++k)right[k]/=rl;
+    const float rl=sqrtf(rage_shadow_dot(right,right));
+    if(rl<.000001f){right[0]=1;right[1]=right[2]=0;}else for(int k=0;k<3;++k)right[k]/=rl;
     vertical[0]=light[1]*right[2]-light[2]*right[1];
     vertical[1]=light[2]*right[0]-light[0]*right[2];
     vertical[2]=light[0]*right[1]-light[1]*right[0];
@@ -41,4 +47,17 @@ static inline int rage_vehicle_shadow_map(const float center[3],float out[12]) {
     out[3]=-rage_shadow_dot(right,snapped)/extent;out[7]=-rage_shadow_dot(vertical,snapped)/extent;
     out[11]=.5f+rage_shadow_dot(light,snapped)/(4*extent);
     return 1;
+}
+static inline int rage_directional_shadow_map_extent(const float center[3],const float raw[3],float extent,float out[12]){return rage_directional_shadow_map_grid(center,raw,extent,4096.f,out);}
+static inline int rage_directional_shadow_map(const float center[3],const float raw[3],float out[12]){return rage_directional_shadow_map_extent(center,raw,16384.f,out);}
+static inline int rage_vehicle_shadow_map(const float center[3],float out[12]){
+    const float raw[3]={-.34f,-1.f,-.42f};return rage_directional_shadow_map(center,raw,out);
+}
+/* Light-frustum selection is independent of the player's viewing direction.
+ * Padding covers the camera/player anchor difference and interpolation. */
+static inline int rage_shadow_bounds_visible(const float rows[12],const float lo[3],const float hi[3],float padding){
+    for(int r=0;r<3;++r){float low=rows[4*r+3],high=low,norm=0;
+        for(int k=0;k<3;++k){const float a=rows[4*r+k];low+=a*(a<0?hi[k]:lo[k]);high+=a*(a<0?lo[k]:hi[k]);norm+=a*a;}
+        const float extra=padding*sqrtf(norm);if(high<(r==2?0.f:-1.f)-extra || low>1.f+extra)return 0;
+    }return 1;
 }

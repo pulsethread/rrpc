@@ -4,7 +4,7 @@
 #include "rage_native_index.h"
 #include "rage_native_terrain_pack.h"
 #include "rage_track.h"
-enum { RAGE_NATIVE_CACHE=512, RAGE_NATIVE_FLOATS=16, RAGE_NATIVE_LOOKUP=2048 };
+enum { RAGE_NATIVE_CACHE=2048, RAGE_NATIVE_FLOATS=16, RAGE_NATIVE_LOOKUP=8192 };
 typedef struct RageNativeBuffer {
     GLuint buffer, indices,shadow_indices,vao,expanded;
     int shadow_count;
@@ -23,10 +23,13 @@ static uint16_t s_native_lookup[RAGE_NATIVE_LOOKUP][4];
  * Extra cache entries accommodate material/visibility variants, not an
  * unbounded allocation for every camera pose or frame. */
 static size_t s_native_retained_bytes;
+static _Atomic uint64_t s_native_live_cache_bytes;
+uint64_t rage_native_cache_usage(void){return atomic_load(&s_native_live_cache_bytes);}
 static GLuint s_native_program,s_native_vao;
 static GLint s_native_rows,s_native_projection,s_native_camera,s_native_pass,s_native_xoff,s_native_xhalf,s_native_aniso,s_native_now;
 static GLint s_native_inverse_view,s_native_shadow_rows,s_native_shadow_pass,s_native_shadow_enabled,s_native_replace_plate;
-static GLint s_native_directional;
+static GLint s_native_directional,s_native_far_rows,s_native_far_enabled,s_native_far_bias,s_native_near_bias,s_native_shadow_filter;
+static GLint s_native_light_direction,s_native_light_ambient,s_native_light_diffuse,s_native_environment_shadow;
 static GLint s_native_spot_count,s_native_spot_position,s_native_spot_direction,s_native_spot_colour;
 static GLint s_native_lens_count,s_native_lens_bounds,s_native_lens_position,s_native_lens_colour;
 static uint64_t s_native_clock;
@@ -49,14 +52,17 @@ uint64_t gl_renderer_native_material_region_count(void){return atomic_load(&s_na
 uint64_t gl_renderer_native_view_clear_count(void){return atomic_load(&s_native_view_clears);}
 static float s_native_vertices[TEXBATCH_MAXV*RAGE_NATIVE_FLOATS];
 static int s_native_terrain_poses,s_native_terrain_original[RAGE_SCENE_PALETTE];
+/* Differentiate camera-relative positions for normals: adding the distant
+ * world origin first loses precision on small building triangles. */
 static const char* RAGE_NATIVE_VS=
     "#version 330\n"
     "layout(location=0)in vec3 position;layout(location=1)in vec2 uv;layout(location=2)in vec3 colour;\n"
     "layout(location=4)in vec4 region;flat out ivec4 bounds;layout(location=3)in vec4 material;uniform vec4 rows[144];uniform vec4 projection[48];uniform vec4 camera_origin[48];\n"
-    "uniform float xoff,xhalf,fade_now;uniform vec4 inverse_view[3],shadow_rows[3];uniform int shadow_pass;out vec3 world_position,shadow_coord,lamp_local;flat out int lamp_pose;flat out float coverage;smooth out vec2 texcoord;smooth out vec3 tint;flat out ivec3 properties;\n"
+    "uniform float xoff,xhalf,fade_now;uniform vec4 inverse_view[3],shadow_rows[3],far_shadow_rows[3];uniform int shadow_pass;out vec3 world_position,shadow_coord,far_shadow_coord,lamp_local,relative_position;flat out int lamp_pose;flat out float coverage;smooth out vec2 texcoord;smooth out vec3 tint;flat out ivec3 properties;\n"
     "void main(){int pose=int(material.y);lamp_pose=pose;lamp_local=position;vec4 p=vec4(position-camera_origin[pose].xyz,camera_origin[pose].w>0.5?0:1);\n"
     "vec3 camera=vec3(dot(rows[pose*3],p),dot(rows[pose*3+1],p),dot(rows[pose*3+2],p));\n"
-    "world_position=vec3(dot(inverse_view[0],vec4(camera,1)),dot(inverse_view[1],vec4(camera,1)),dot(inverse_view[2],vec4(camera,1)));shadow_coord=vec3(dot(shadow_rows[0],vec4(world_position,1)),dot(shadow_rows[1],vec4(world_position,1)),dot(shadow_rows[2],vec4(world_position,1)));\n"
+    "relative_position=vec3(dot(inverse_view[0].xyz,camera),dot(inverse_view[1].xyz,camera),dot(inverse_view[2].xyz,camera));world_position=vec3(dot(inverse_view[0],vec4(camera,1)),dot(inverse_view[1],vec4(camera,1)),dot(inverse_view[2],vec4(camera,1)));shadow_coord=vec3(dot(shadow_rows[0],vec4(world_position,1)),dot(shadow_rows[1],vec4(world_position,1)),dot(shadow_rows[2],vec4(world_position,1)));\n"
+    "far_shadow_coord=vec3(dot(far_shadow_rows[0],vec4(world_position,1)),dot(far_shadow_rows[1],vec4(world_position,1)),dot(far_shadow_rows[2],vec4(world_position,1)));far_shadow_coord.xy=far_shadow_coord.xy*.5+.5;\n"
     "vec4 lens=projection[pose];vec2 h=camera.xy*lens.xy+camera.z*lens.zw;\n"
     "int bias=(int(material.z)>>1)&255;if(bias>=128)bias-=256;float worldBias=float(bias);\n"
     "float depthBias=(int(material.w)&4096)!=0?-2048.0:float(bias);worldBias=(int(material.w)&4096)!=0?depthBias*0.25:worldBias;float legacyBias=depthBias*camera.z/1048576.0;float bound=16.0*worldBias/max(camera.z+worldBias,1.0);\n"
@@ -66,8 +72,8 @@ static const char* RAGE_NATIVE_VS=
     "coverage=abs(camera_origin[pose].w)>2.0?clamp(fade_now-(abs(camera_origin[pose].w)-2.0),0.0,1.0):1.0;bounds=ivec4(region);texcoord=uv;tint=colour;properties=ivec3(int(material.x),int(material.z),int(material.w));}\n";
 static const char* RAGE_NATIVE_FS=
     "#version 330\n"
-    "uniform sampler2D colours,shadow_map;uniform usampler2D flags;uniform int pass,aniso,shadow_pass,shadow_enabled,replace_plate,directional;in vec3 world_position,shadow_coord;\n"
-    "uniform int spot_count;uniform vec4 spot_position[16],spot_direction[16],spot_colour[16];\n"
+    "uniform sampler2D colours,shadow_map,far_shadow_map;uniform int far_shadow_enabled,shadow_filter;uniform float far_shadow_bias,near_shadow_bias;uniform usampler2D flags;uniform int pass,aniso,shadow_pass,shadow_enabled,replace_plate,directional;in vec3 world_position,shadow_coord,far_shadow_coord,relative_position;\n"
+    "uniform int spot_count,environment_shadow;uniform vec4 light_direction,light_ambient,light_diffuse;uniform vec4 spot_position[16],spot_direction[16],spot_colour[16];\n"
     "in vec3 lamp_local;flat in int lamp_pose;uniform int lens_count;uniform vec4 lens_bounds[64],lens_position[64],lens_colour[64];\n"
     "flat in float coverage;smooth in vec2 texcoord;smooth in vec3 tint;flat in ivec3 properties;flat in ivec4 bounds;out vec4 frag;\n"
     "ivec2 origin(){return ivec2(properties.x&15,properties.x>>4)*256;}\n"
@@ -91,14 +97,15 @@ static const char* RAGE_NATIVE_FS=
     "}\n"
     "vec3 local_lights(vec3 n){vec3 sum=vec3(0);for(int i=0;i<spot_count;++i){vec3 delta=world_position-spot_position[i].xyz;float d2=dot(delta,delta),range=spot_position[i].w; if(d2>=range*range || d2<.000001)continue;vec3 d=delta*inversesqrt(d2);float cone=dot(d,spot_direction[i].xyz);if(cone<=spot_direction[i].w)continue;float cutoff=1.0;if(range>2000.0){if(delta.y<0.0)continue;cutoff=smoothstep(0.0,32.0,delta.y);}float edge=cutoff*smoothstep(spot_direction[i].w,spot_colour[i].w,cone),falloff=1.0-d2/(range*range);sum+=spot_colour[i].rgb*edge*falloff*falloff*abs(dot(n,-d));}return sum/(vec3(1)+sum);}\n"
     "vec3 lamp_emission(){vec3 emission=vec3(0);for(int i=0;i<lens_count;++i){if(int(lens_position[i].w)!=lamp_pose)continue;vec3 delta=lamp_local-lens_position[i].xyz;if(dot(delta,delta)>6400.0)continue;vec4 b=lens_bounds[i];if(any(lessThan(texcoord,b.xy))||any(greaterThan(texcoord,b.zw)))continue;if(fract(lens_position[i].w)>.25){vec2 q=(texcoord-(b.xy+b.zw)*.5)/max((b.zw-b.xy)*.5,vec2(.00001));if(dot(q,q)>1.0)continue;}emission=max(emission,lens_colour[i].rgb);}return emission;}\n"
-    "float vehicle_visibility(vec3 dx,vec3 dy,float facing){float bias=mix(.00025,.00008,facing);\n"
-    "if(any(lessThanEqual(shadow_coord,vec3(0)))||any(greaterThanEqual(shadow_coord,vec3(1))))return 1.0;float det=dx.x*dy.y-dx.y*dy.x;vec2 slope=abs(det)>.000000000001?vec2(dx.z*dy.y-dy.z*dx.y,dy.z*dx.x-dx.z*dy.x)/det:vec2(0);vec2 size=vec2(textureSize(shadow_map,0)),pixel=shadow_coord.xy*size-.5,f=fract(pixel),first=(floor(pixel)+.5)/size;float v=0;\n"
-    "for(int y=0;y<2;++y)for(int x=0;x<2;++x){vec2 uv=first+vec2(x,y)/size;float depth=texture(shadow_map,uv).r;float receiver=shadow_coord.z+clamp(dot(slope,uv-shadow_coord.xy),-.01,.01);v+=(receiver-bias<=depth?1.0:0.0)*(x==0?1.0-f.x:f.x)*(y==0?1.0-f.y:f.y);}return v;}\n"
-    "void main(){vec2 dx=dFdx(texcoord),dy=dFdy(texcoord);vec3 sx=dFdx(shadow_coord),sy=dFdy(shadow_coord);vec3 normal=cross(dFdx(world_position),dFdy(world_position));vec3 n=normal*inversesqrt(max(dot(normal,normal),.00000001));float facing=abs(dot(n,normalize(vec3(-.34,-1,-.42))));ivec2 p=address(ivec2(floor(texcoord)));\n"
-    "if(replace_plate!=0 && (properties.z&8192)!=0)discard;if(shadow_pass!=0 && (properties.z&8192)==0)discard;\n"
-    "if((properties.z&512)!=0 && gl_FrontFacing==((properties.z&1024)!=0))discard;\n"
+    "float cascade_visibility(sampler2D map,vec3 coord,vec3 dx,vec3 dy,float facing,float scale){float bias=mix(.00025,.00008,facing)*scale;\n"
+    "if(any(lessThanEqual(coord,vec3(0)))||any(greaterThanEqual(coord,vec3(1))))return 1.0;float det=dx.x*dy.y-dx.y*dy.x;vec2 slope=abs(det)>.000000000001?vec2(dx.z*dy.y-dy.z*dx.y,dy.z*dx.x-dx.z*dy.x)/det:vec2(0);vec2 size=vec2(textureSize(map,0));float v=0;int taps=shadow_filter>0?4:1;\n"
+    "for(int tap=0;tap<taps;++tap){vec2 offset=taps>1?vec2((tap&1)!=0?.5:-.5,(tap&2)!=0?.5:-.5):vec2(0);vec2 pixel=coord.xy*size-.5+offset,f=fract(pixel),first=(floor(pixel)+.5)/size;for(int y=0;y<2;++y)for(int x=0;x<2;++x){vec2 uv=first+vec2(x,y)/size;float depth=texture(map,uv).r;float receiver=coord.z+clamp(dot(slope,uv-coord.xy),-.01,.01);v+=(receiver-bias<=depth?1.0:0.0)*(x==0?1.0-f.x:f.x)*(y==0?1.0-f.y:f.y);}}v/=float(taps);float edge=min(min(coord.x,1.0-coord.x),min(coord.y,1.0-coord.y));return mix(1.0,v,smoothstep(0.0,.08,edge));}\n"
+    "float vehicle_visibility(vec3 dx,vec3 dy,float facing){float nearValue=cascade_visibility(shadow_map,shadow_coord,dx,dy,facing,near_shadow_bias);if(far_shadow_enabled==0)return nearValue;float farValue=cascade_visibility(far_shadow_map,far_shadow_coord,dFdx(far_shadow_coord),dFdy(far_shadow_coord),facing,far_shadow_bias);float edge=min(min(shadow_coord.x,1.0-shadow_coord.x),min(shadow_coord.y,1.0-shadow_coord.y));float weight=smoothstep(.05,.18,edge);if(shadow_coord.z<=0.0 || shadow_coord.z>=1.0)weight=0.0;return mix(farValue,nearValue,weight); }\n"
+    "void main(){if(shadow_pass!=0 && (properties.z&32768)!=0)discard;vec2 dx=dFdx(texcoord),dy=dFdy(texcoord);vec3 sx=dFdx(shadow_coord),sy=dFdy(shadow_coord);vec3 normal=cross(dFdx(relative_position),dFdy(relative_position));vec3 n=normal*inversesqrt(max(dot(normal,normal),.00000001));float facing=abs(dot(n,normalize(light_direction.xyz)));ivec2 p=address(ivec2(floor(texcoord)));\n"
+    "if(replace_plate!=0 && (properties.z&8192)!=0)discard;if(shadow_pass!=0 && environment_shadow==0 && (properties.z&8192)==0)discard;\n"
+    "if(shadow_pass==0 && (properties.z&512)!=0 && gl_FrontFacing==((properties.z&1024)!=0))discard;\n"
     "// Stable coverage transparency preserves depth and ordering across road/decal layers.\n"
-    "if(coverage<1.0 && (coverage<=0.0 || fract(52.9829189*fract(dot(floor(gl_FragCoord.xy),vec2(0.06711056,0.00583715))))>=coverage))discard;\n"
+    "if(shadow_pass==0 && coverage<1.0 && (coverage<=0.0 || fract(52.9829189*fract(dot(floor(gl_FragCoord.xy),vec2(0.06711056,0.00583715))))>=coverage))discard;\n"
     "bool solid=(properties.z&64)!=0;vec4 c=solid?vec4(1):texel(p);if(c.a<0.5)discard;uint stp=solid?1u:texelFetch(flags,origin()+p,0).r;\n"
     "if((pass==1 && stp!=0u)||(pass==2 && stp==0u))discard;\n"
     "if(shadow_pass!=0){frag=vec4(1);return;}\n"
@@ -110,8 +117,8 @@ static const char* RAGE_NATIVE_FS=
     "else if(!solid && (properties.z&15)!=0){vec2 q=texcoord-0.5,f=fract(q);ivec2 b=ivec2(floor(q));\n"
     "vec4 filtered=mix(mix(texel(b),texel(b+ivec2(1,0)),f.x),mix(texel(b+ivec2(0,1)),texel(b+ivec2(1,1)),f.x),f.y);\n"
     "if(filtered.a>0.00001)c.rgb=filtered.rgb/filtered.a;}\n"
-    "vec3 rgb=solid?tint:((properties.y&1)!=0?c.rgb:clamp(c.rgb*tint*2.0,0.0,1.0));float visibility=1.0;if(shadow_enabled!=0 && (properties.z&8192)==0)visibility=vehicle_visibility(sx,sy,facing);\n"
-    "vec3 base=rgb;if(directional!=0 && (properties.z&8192)==0){vec3 ambient=vec3(.35,.35,.38),diffuse=vec3(.85,.85,.80)*facing;vec3 lit=ambient+diffuse;vec3 reference=vec3(.35,.35,.38)+vec3(.85,.85,.80)*inversesqrt(1.292);vec3 shade=(ambient*mix(.55,1.0,visibility)+diffuse*mix(.10,1.0,visibility))/max(lit,vec3(.0001));rgb*=mix(vec3(1),clamp(lit/reference,vec3(.18),vec3(1)),.5)*shade;}else rgb*=mix(.55,1.0,visibility);if(spot_count>0)rgb+=base*local_lights(n);if(lens_count>0 && (properties.z&8192)!=0){vec3 emission=lamp_emission();rgb+=(vec3(1)-clamp(rgb,0.0,1.0))*emission/(vec3(1)+emission);}frag=vec4(rgb,float(stp));}\n";
+    "vec3 rgb=solid?tint:((properties.y&1)!=0?c.rgb:clamp(c.rgb*tint*2.0,0.0,1.0));float visibility=1.0;if(shadow_enabled!=0 && ((properties.z&8192)!=0 || abs(n.y)>.55))visibility=vehicle_visibility(sx,sy,facing);\n"
+    "if((properties.z&32768)!=0){frag=vec4(rgb,float(stp));return;}vec3 base=rgb;if(directional!=0){vec3 ambient=light_ambient.rgb,diffuse=light_diffuse.rgb*facing;vec3 lit=ambient+diffuse;vec3 reference=vec3(.35,.35,.38)+vec3(.85,.85,.80)*inversesqrt(1.292);vec3 shade=(ambient+diffuse*mix(.16,1.0,visibility))/max(lit,vec3(.0001));rgb*=mix(vec3(1),clamp(lit/reference,vec3(.18),vec3(1.15)),.7)*shade;}else rgb*=mix(.55,1.0,visibility);if(spot_count>0)rgb+=base*local_lights(n);if(lens_count>0 && (properties.z&8192)!=0){vec3 emission=lamp_emission();rgb+=(vec3(1)-clamp(rgb,0.0,1.0))*emission/(vec3(1)+emission);}frag=vec4(rgb,float(stp));}\n";
 static int rage_native_init(void) {
     if(s_native_program)return 1;
     s_native_program=build_program(RAGE_NATIVE_VS,RAGE_NATIVE_FS);
@@ -129,13 +136,26 @@ static int rage_native_init(void) {
     s_native_xhalf=p_glGetUniformLocation(s_native_program,"xhalf");
     s_native_inverse_view=p_glGetUniformLocation(s_native_program,"inverse_view");s_native_shadow_rows=p_glGetUniformLocation(s_native_program,"shadow_rows");
     s_native_shadow_pass=p_glGetUniformLocation(s_native_program,"shadow_pass");s_native_shadow_enabled=p_glGetUniformLocation(s_native_program,"shadow_enabled");s_native_replace_plate=p_glGetUniformLocation(s_native_program,"replace_plate");
+    s_native_shadow_filter=p_glGetUniformLocation(s_native_program,"shadow_filter");
+    s_native_far_rows=p_glGetUniformLocation(s_native_program,"far_shadow_rows");
+    s_native_far_enabled=p_glGetUniformLocation(s_native_program,"far_shadow_enabled");
+    s_native_near_bias=p_glGetUniformLocation(s_native_program,"near_shadow_bias");
+    s_native_far_bias=p_glGetUniformLocation(s_native_program,"far_shadow_bias");
     s_native_directional=p_glGetUniformLocation(s_native_program,"directional");
+    s_native_light_direction=p_glGetUniformLocation(s_native_program,"light_direction");
+    s_native_light_ambient=p_glGetUniformLocation(s_native_program,"light_ambient");s_native_light_diffuse=p_glGetUniformLocation(s_native_program,"light_diffuse");
+    s_native_environment_shadow=p_glGetUniformLocation(s_native_program,"environment_shadow");
+    p_glUseProgram(s_native_program);
+    p_glUniform1f(s_native_near_bias,1.f);
+    {const float direction[4]={-.34f,-1,-.42f,0},ambient[4]={.35f,.35f,.38f,0},diffuse[4]={.85f,.85f,.80f,0};
+        p_glUniform4fv(s_native_light_direction,1,direction);p_glUniform4fv(s_native_light_ambient,1,ambient);p_glUniform4fv(s_native_light_diffuse,1,diffuse);}
     s_native_spot_count=p_glGetUniformLocation(s_native_program,"spot_count");s_native_spot_position=p_glGetUniformLocation(s_native_program,"spot_position");s_native_spot_direction=p_glGetUniformLocation(s_native_program,"spot_direction");s_native_spot_colour=p_glGetUniformLocation(s_native_program,"spot_colour");
     s_native_lens_count=p_glGetUniformLocation(s_native_program,"lens_count");s_native_lens_bounds=p_glGetUniformLocation(s_native_program,"lens_bounds");s_native_lens_position=p_glGetUniformLocation(s_native_program,"lens_position");s_native_lens_colour=p_glGetUniformLocation(s_native_program,"lens_colour");
     p_glUseProgram(s_native_program);
     p_glUniform1i(p_glGetUniformLocation(s_native_program,"colours"),3);
     p_glUniform1i(p_glGetUniformLocation(s_native_program,"flags"),4);
     p_glUniform1i(p_glGetUniformLocation(s_native_program,"shadow_map"),5);
+    p_glUniform1i(p_glGetUniformLocation(s_native_program,"far_shadow_map"),6);
     return 1;
 }
 static void rage_native_forget(int i) {
@@ -145,7 +165,7 @@ static void rage_native_forget(int i) {
     if(mesh->shadow_indices)p_glDeleteBuffers(1,&mesh->shadow_indices);
     if(mesh->vao)p_glDeleteVertexArrays(1,&mesh->vao);
     if(mesh->expanded)p_glDeleteBuffers(1,&mesh->expanded);
-    s_native_retained_bytes-=mesh->bytes;
+    s_native_retained_bytes-=mesh->bytes;atomic_store(&s_native_live_cache_bytes,s_native_retained_bytes);
     free(mesh->content);memset(mesh,0,sizeof(*mesh));
 }
 static RageNativeBuffer* rage_native_buffer(float* vertices,size_t bytes) {
@@ -241,7 +261,7 @@ static RageNativeBuffer* rage_native_buffer(float* vertices,size_t bytes) {
     atomic_fetch_add(&s_native_source_bytes,bytes);
     mesh->bytes=bytes;mesh->key=key;mesh->touched=s_native_clock;
     mesh->serial=++s_native_serial;
-    s_native_retained_bytes+=bytes;
+    s_native_retained_bytes+=bytes;atomic_store(&s_native_live_cache_bytes,s_native_retained_bytes);
     memmove(s_native_lookup[bucket]+1,s_native_lookup[bucket],3*sizeof(uint16_t));s_native_lookup[bucket][0]=(uint16_t)(victim+1);
     if(hint<256)s_native_replay_hints[hint]=(uint16_t)(victim+1);
     atomic_fetch_add(&s_native_uploads,1);return mesh;
@@ -376,7 +396,7 @@ static void rage_native_release(void) {
         free(s_native_meshes[i].content);
     }
     memset(s_native_meshes,0,sizeof s_native_meshes);s_native_clock=0;
-    memset(s_native_lookup,0,sizeof s_native_lookup);s_native_retained_bytes=0;
+    memset(s_native_lookup,0,sizeof s_native_lookup);s_native_retained_bytes=0;atomic_store(&s_native_live_cache_bytes,0);
     memset(s_native_replay_hints,0,sizeof s_native_replay_hints);s_native_replay_cursor=0;
     if(s_native_program)p_glDeleteProgram(s_native_program);
     if(s_native_vao)p_glDeleteVertexArrays(1,&s_native_vao);
@@ -403,8 +423,8 @@ int gl_renderer_native_material_probe(void) {
     const int keep_anisotropy=s_tex_aniso;
     const RageNativeViews keep_views=s_scene_views;s_scene_views.count=0;
     const int keep_terrain=s_tb_scene_terrain;s_tb_scene_terrain=0;
-    GLint keep_textures[6],keep_viewport[4];glGetIntegerv(GL_VIEWPORT,keep_viewport);
-    for(int u=0;u<6;++u){p_glActiveTexture(PSXGL_TEXTURE0+u);glGetIntegerv(GL_TEXTURE_BINDING_2D,keep_textures+u);}
+    GLint keep_textures[7],keep_viewport[4];glGetIntegerv(GL_VIEWPORT,keep_viewport);
+    for(int u=0;u<7;++u){p_glActiveTexture(PSXGL_TEXTURE0+u);glGetIntegerv(GL_TEXTURE_BINDING_2D,keep_textures+u);}
     for(int y=0;y<256;++y)for(int x=0;x<256;++x){
         unsigned char* p=pixels+4*(y*256+x);
         const int inside=x>=16 && x<=31 && y>=16 && y<=31;
@@ -437,6 +457,11 @@ int gl_renderer_native_material_probe(void) {
     for(int i=0;i<5;++i){p_glEnableVertexAttribArray(i);p_glVertexAttribPointer(i,sizes[i],GL_FLOAT,GL_FALSE,64,(void*)(size_t)(offsets[i]*4));}
     p_glUseProgram(s_native_program);
     p_glUniform1i(p_glGetUniformLocation(s_native_program,"shadow_enabled"),0);p_glUniform1i(p_glGetUniformLocation(s_native_program,"replace_plate"),0);p_glUniform1i(p_glGetUniformLocation(s_native_program,"shadow_pass"),0);
+    {const float direction[4]={-.34f,-1,-.42f,0},ambient[4]={.35f,.35f,.38f,0},diffuse[4]={.85f,.85f,.80f,0};
+        p_glUniform4fv(s_native_light_direction,1,direction);p_glUniform4fv(s_native_light_ambient,1,ambient);p_glUniform4fv(s_native_light_diffuse,1,diffuse);p_glUniform1i(s_native_environment_shadow,0);}
+    p_glUniform1f(s_native_near_bias,1.f);
+    p_glUniform1i(s_native_shadow_filter,0);
+    p_glUniform1i(s_native_far_enabled,0);
     p_glUniform1i(s_native_directional,0);
     p_glUniform1i(s_native_spot_count,0);
     p_glUniform1i(s_native_lens_count,0);
@@ -645,10 +670,36 @@ int gl_renderer_native_material_probe(void) {
         p_glUniform1i(shadow_pass,1);p_glUniform1i(s_native_pass,0);glEnable(GL_DEPTH_TEST);glDepthMask(GL_TRUE);glDepthFunc(GL_LESS);
         glClearDepth(1);glClear(GL_DEPTH_BUFFER_BIT);glDrawArrays(GL_TRIANGLES,0,6);
         float light_depth=0;glReadPixels(255,128,1,1,GL_DEPTH_COMPONENT,GL_FLOAT,&light_depth);if(fabsf(light_depth-.25f)>.00001f)++failures;
+        // A scene-frame map survives a receiver-only flush and accumulates a
+        // subsequent, more distant caster rather than clearing the first one.
+        for(int has_casters=0;has_casters<2;++has_casters){
+            const int plan=rage_shadow_update_plan(1,has_casters);
+            if(plan==1)glClear(GL_DEPTH_BUFFER_BIT);
+            if(plan){shadow_rows[11]=.75f;p_glUniform4fv(s_native_shadow_rows,3,shadow_rows);glDrawArrays(GL_TRIANGLES,0,6);}
+            glReadPixels(255,128,1,1,GL_DEPTH_COMPONENT,GL_FLOAT,&light_depth);
+            if(fabsf(light_depth-.25f)>.00001f)++failures;
+        }
+        shadow_rows[11]=.25f;p_glUniform4fv(s_native_shadow_rows,3,shadow_rows);
         for(int i=0;i<6;++i)vertices[i*16+11]=64;
         p_glBufferData(PSXGL_ARRAY_BUFFER,sizeof vertices,vertices,GL_STATIC_DRAW);
         glClear(GL_DEPTH_BUFFER_BIT);glDrawArrays(GL_TRIANGLES,0,6);glReadPixels(255,128,1,1,GL_DEPTH_COMPONENT,GL_FLOAT,&light_depth);
         if(light_depth<.99999f)++failures;
+        // The same production depth shader admits environment geometry only
+        // during its own caster pass. Main colour/depth never sees it here.
+        p_glUniform1i(s_native_environment_shadow,1);glClear(GL_DEPTH_BUFFER_BIT);glDrawArrays(GL_TRIANGLES,0,6);
+        glReadPixels(255,128,1,1,GL_DEPTH_COMPONENT,GL_FLOAT,&light_depth);if(fabsf(light_depth-.25f)>.00001f)++failures;
+        // A leaf/sign cutout must leave light-space depth empty, while its
+        // opaque neighbour casts normally with the same texture and mesh.
+        for(int step=0;step<2;++step){const unsigned char pixel[4]={0,0,0,step?255:0};
+            for(int i=0;i<6;++i)vertices[i*16+11]=0;
+            p_glBufferData(PSXGL_ARRAY_BUFFER,sizeof vertices,vertices,GL_STATIC_DRAW);
+            p_glActiveTexture(PSXGL_TEXTURE0+3);glBindTexture(GL_TEXTURE_2D,colour);glTexSubImage2D(GL_TEXTURE_2D,0,0,0,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel);
+            glClear(GL_DEPTH_BUFFER_BIT);glDrawArrays(GL_TRIANGLES,0,6);glReadPixels(255,128,1,1,GL_DEPTH_COMPONENT,GL_FLOAT,&light_depth);
+            if(fabsf(light_depth-(step?.25f:1.f))>.00001f)++failures;
+        }
+        for(int i=0;i<6;++i)vertices[i*16+11]=64|8192;
+        p_glBufferData(PSXGL_ARRAY_BUFFER,sizeof vertices,vertices,GL_STATIC_DRAW);
+        p_glUniform1i(s_native_environment_shadow,0);
         p_glUniform1i(shadow_pass,0);p_glUniform1i(enabled,1);glDisable(GL_DEPTH_TEST);glDepthMask(GL_FALSE);
         memset(shadow_rows,0,sizeof shadow_rows);shadow_rows[11]=.5f;
         p_glUniform4fv(p_glGetUniformLocation(s_native_program,"shadow_rows"),3,shadow_rows);
@@ -659,6 +710,20 @@ int gl_renderer_native_material_probe(void) {
             glTexImage2D(GL_TEXTURE_2D,0,0x81A6,2,2,0,GL_DEPTH_COMPONENT,GL_FLOAT,block);glDrawArrays(GL_TRIANGLES,0,6);
             unsigned char pixel[4];glReadPixels(255,128,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel);
             if(pixel[0]>1 || pixel[2]>1 || abs((int)pixel[1]-(step?255:140))>2)++failures;}
+        // An upright decorative sheet retains its authored texture rather
+        // than showing its own overlapping faces as changing dark patches.
+        for(int i=0;i<6;++i)vertices[i*16+11]=64;
+        p_glBufferData(PSXGL_ARRAY_BUFFER,sizeof vertices,vertices,GL_STATIC_DRAW);
+        {float block[4]={.25f,.25f,.25f,.25f};glTexImage2D(GL_TEXTURE_2D,0,0x81A6,2,2,0,GL_DEPTH_COMPONENT,GL_FLOAT,block);
+            glDrawArrays(GL_TRIANGLES,0,6);unsigned char pixel[4];glReadPixels(255,128,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel);if(pixel[1]<254)++failures;}
+        for(int i=0;i<6;++i)vertices[i*16+11]=64|8192;
+        p_glBufferData(PSXGL_ARRAY_BUFFER,sizeof vertices,vertices,GL_STATIC_DRAW);
+        // The local light volume fades out before its boundary rather than
+        // exposing a moving rectangular shadow edge on distant terrain.
+        {float block[4]={.25f,.25f,.25f,.25f};glTexImage2D(GL_TEXTURE_2D,0,0x81A6,2,2,0,GL_DEPTH_COMPONENT,GL_FLOAT,block);
+            shadow_rows[3]=.98f;p_glUniform4fv(s_native_shadow_rows,3,shadow_rows);glDrawArrays(GL_TRIANGLES,0,6);
+            unsigned char pixel[4];glReadPixels(255,128,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel);if(pixel[1]<240)++failures;
+            shadow_rows[3]=0;p_glUniform4fv(s_native_shadow_rows,3,shadow_rows);}
         /* Reference ambient/diffuse split, including a reflected camera.
          * Derivatives are evaluated before alpha/coverage rejection, and
          * two-sided retail terrain must receive identical mirror lighting. */
@@ -666,16 +731,53 @@ int gl_renderer_native_material_probe(void) {
         for(int mirror=0;mirror<2;++mirror){float inverse[12]={1,0,0,0,0,1,0,0,0,0,1,0};inverse[0]=mirror?-1.f:1.f;
             p_glUniform4fv(s_native_inverse_view,3,inverse);
             const float facing=.42f/sqrtf(1.292f),diffuse=.85f*facing,lit=.35f+diffuse;
-            const float modulation=.5f+.5f*lit/(.35f+.85f/sqrtf(1.292f));
+            const float modulation=.3f+.7f*lit/(.35f+.85f/sqrtf(1.292f));
             for(int step=0;step<3;++step){float block[4]={depths[step],depths[step],depths[step],depths[step]};
                 glTexImage2D(GL_TEXTURE_2D,0,0x81A6,2,2,0,GL_DEPTH_COMPONENT,GL_FLOAT,block);glDrawArrays(GL_TRIANGLES,0,6);
                 unsigned char pixel[4];glReadPixels(255,128,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel);
-                const int expected=(int)lroundf(255*modulation*(step?1.f:(.35f*.55f+diffuse*.10f)/lit));
+                const int expected=(int)lroundf(255*modulation*(step?1.f:(.35f+diffuse*.16f)/lit));
                 if(pixel[0]>1 || pixel[2]>1 || abs((int)pixel[1]-expected)>2)++failures;
             }
         }
         p_glUniform1i(s_native_directional,0);
+        // A receiver beyond the near grid still gets the far cascade's shadow.
+        {GLuint far_depth=0;glGenTextures(1,&far_depth);p_glActiveTexture(PSXGL_TEXTURE0+6);glBindTexture(GL_TEXTURE_2D,far_depth);
+            float block[4]={.25f,.25f,.25f,.25f};glTexImage2D(GL_TEXTURE_2D,0,0x81A6,2,2,0,GL_DEPTH_COMPONENT,GL_FLOAT,block);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+            float outside[12];memcpy(outside,shadow_rows,sizeof outside);outside[3]=3.f;
+            p_glUniform4fv(s_native_shadow_rows,3,outside);p_glUniform4fv(s_native_far_rows,3,shadow_rows);p_glUniform1f(s_native_far_bias,1);p_glUniform1i(s_native_far_enabled,1);p_glUniform1i(s_native_shadow_filter,1);
+            glDrawArrays(GL_TRIANGLES,0,6);unsigned char pixel[4];glReadPixels(255,128,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel);
+            if(pixel[0]>1 || pixel[2]>1 || abs((int)pixel[1]-140)>2)++failures;
+            // Distant planar receivers need a texel-scaled tolerance. The
+            // previous near/far-extent scaling falsely shadowed this surface.
+            for(int i=0;i<4;++i)block[i]=.49995f;
+            glTexImage2D(GL_TEXTURE_2D,0,0x81A6,2,2,0,GL_DEPTH_COMPONENT,GL_FLOAT,block);
+            for(int control=0;control<2;++control){p_glUniform1f(s_native_far_bias,control?1.f/12.f:.5f);
+                glDrawArrays(GL_TRIANGLES,0,6);glReadPixels(255,128,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel);
+                if(abs((int)pixel[1]-(control?140:255))>2)++failures;
+            }
+            p_glUniform1i(s_native_shadow_filter,0);p_glUniform1i(s_native_far_enabled,0);p_glUniform4fv(s_native_shadow_rows,3,shadow_rows);glDeleteTextures(1,&far_depth);p_glActiveTexture(PSXGL_TEXTURE0+5);
+        }
         glDeleteTextures(1,&probe_depth);p_glActiveTexture(PSXGL_TEXTURE0);p_glUniform1i(enabled,0);
+        // Sky hue reaches actual fragments, rather than only the background.
+        {const float top[3]={.1f,.1f,.2f},horizons[2][3]={{.8f,.25f,.08f},{.1f,.25f,.8f}};
+            for(int i=0;i<6;++i)vertices[i*16+5]=vertices[i*16+6]=vertices[i*16+7]=.5f;
+            p_glBufferData(PSXGL_ARRAY_BUFFER,sizeof vertices,vertices,GL_STATIC_DRAW);p_glUniform1i(s_native_directional,1);
+            for(int step=0;step<2;++step){RageEnvironmentLight light;rage_environment_light(top,horizons[step],&light);
+                p_glUniform4fv(s_native_light_direction,1,light.direction);p_glUniform4fv(s_native_light_ambient,1,light.ambient);p_glUniform4fv(s_native_light_diffuse,1,light.diffuse);
+                glDrawArrays(GL_TRIANGLES,0,6);unsigned char pixel[4];glReadPixels(255,128,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel);
+                if(step?pixel[2]<pixel[0]+10:pixel[0]<pixel[2]+10)++failures;
+            }
+            // UI retains its authored colours under either sky palette.
+            unsigned char ui_reference[4]={0};
+            for(int i=0;i<6;++i)vertices[i*16+11]=(float)((unsigned)vertices[i*16+11]|32768u);
+            p_glBufferData(PSXGL_ARRAY_BUFFER,sizeof vertices,vertices,GL_STATIC_DRAW);
+            for(int step=0;step<2;++step){RageEnvironmentLight light;rage_environment_light(top,horizons[step],&light);
+                p_glUniform4fv(s_native_light_direction,1,light.direction);p_glUniform4fv(s_native_light_ambient,1,light.ambient);p_glUniform4fv(s_native_light_diffuse,1,light.diffuse);
+                glDrawArrays(GL_TRIANGLES,0,6);unsigned char pixel[4];glReadPixels(255,128,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel);
+                if(!step)memcpy(ui_reference,pixel,4);else if(memcmp(ui_reference,pixel,4))++failures;
+            }p_glUniform1i(s_native_directional,0);
+        }
         /* A neutral receiver brightens only inside a local light's range/cone. */
         {float inverse[12]={1,0,0,0,0,1,0,0,0,0,1,0};p_glUniform4fv(s_native_inverse_view,3,inverse);
             for(int i=0;i<6;++i){vertices[16*i+5]=vertices[16*i+6]=vertices[16*i+7]=.25f;vertices[16*i+11]=64;}
@@ -783,7 +885,7 @@ finish:
     if(depth)p_glDeleteRenderbuffers(1,&depth);
     if(colour)glDeleteTextures(1,&colour);if(stp)glDeleteTextures(1,&stp);if(target)glDeleteTextures(1,&target);
     glDepthMask(GL_FALSE);hr_end();
-    for(int u=0;u<6;++u){p_glActiveTexture(PSXGL_TEXTURE0+u);glBindTexture(GL_TEXTURE_2D,(GLuint)keep_textures[u]);}
+    for(int u=0;u<7;++u){p_glActiveTexture(PSXGL_TEXTURE0+u);glBindTexture(GL_TEXTURE_2D,(GLuint)keep_textures[u]);}
     p_glActiveTexture(PSXGL_TEXTURE0);glViewport(keep_viewport[0],keep_viewport[1],keep_viewport[2],keep_viewport[3]);
     p_glBindFramebuffer(PSXGL_FRAMEBUFFER,s_hr_fbo);return failures;
 }

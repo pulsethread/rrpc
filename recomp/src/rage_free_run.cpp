@@ -4,13 +4,20 @@
 #include "rage_free_run_art.h"
 #include "rage_free_world.h"
 #include "rage_multiplayer.h"
+#include "rage_split_select.h"
 #include "rage_multiplayer_art.h"
+#include "rage_menu_options_art.h"
+#include "rage_free_run_tv.h"
+#include "rage_track.h"
 #include <algorithm>
 
 namespace {
 int selection=0;
 bool free_run=false;
+RageFreeRunTV free_run_tv;
 bool multiplayer=false;
+int multiplayer_row=0;
+bool multiplayer_direction_held=false;
 bool exit_vehicle_select=false;
 uint32_t addr(uint32_t p){return rage_region_address(p);}
 uint32_t word(CPUState* c,uint32_t p){return c->read_word(addr(p));}
@@ -34,13 +41,17 @@ void prepare_labels(){
         gpu_write_gp0(0xa0000000);gpu_write_gp0(604|(uint32_t(top)<<16));gpu_write_gp0(28|(16u<<16));
         for(size_t i=0;i<label.size();i+=2)gpu_write_gp0(label[i]|(uint32_t(label[i+1])<<16));
     }
-    // One native indexed row serves both original grey/red CLUTs. The
-    // copyright occupies v240..255; this row ends immediately above it.
+    // Independent normal and selected multiplayer artwork. Selected fits
+    // between Press Start and Free Run, ending before the TM's U coordinate.
+    for(int state=0;state<2;++state){
+    const int top=state?432:480;
+    const auto& label=rage_multiplayer_labels[state];
     bool matches=true;
     for(int y=0;y<16 && matches;++y)for(int x=0;x<28;++x)
-        if(vram[(480+y)*1024+604+x]!=rage_multiplayer_label[y*28+x]){matches=false;break;}
-    if(!matches){gpu_write_gp0(0xa0000000);gpu_write_gp0(604|(480u<<16));gpu_write_gp0(28|(16u<<16));
-        for(size_t i=0;i<rage_multiplayer_label.size();i+=2)gpu_write_gp0(rage_multiplayer_label[i]|(uint32_t(rage_multiplayer_label[i+1])<<16));}
+        if(vram[(top+y)*1024+604+x]!=label[y*28+x]){matches=false;break;}
+    if(!matches){gpu_write_gp0(0xa0000000);gpu_write_gp0(604|(uint32_t(top)<<16));gpu_write_gp0(28|(16u<<16));
+        for(size_t i=0;i<label.size();i+=2)gpu_write_gp0(label[i]|(uint32_t(label[i+1])<<16));}
+    }
 }
 // The game's POLY_FT4 layout. Publish through the same ordering table and
 // scratch cursor as the original rows, retaining fades and presentation paths.
@@ -73,7 +84,7 @@ void draw_menu(CPUState* c){
         }else if(i==3){
             rect(c,cursor,ot,104,y,112,h,112,highlight?208:192,112,16,clut,0x39);
         }else{
-            rect(c,cursor,ot,104,y,112,h,112,224,112,16,clut,0x39);
+            rect(c,cursor,ot,104,y,112,h,112,highlight?176:224,112,16,clut,0x39);
         }
     }
     c->write_word(0x1f800000,cursor);
@@ -83,8 +94,24 @@ void draw_menu(CPUState* c){
 extern "C" int rage_free_run_dispatch(CPUState* c,uint32_t target){
     if(!c || !c->read_word || !c->write_word || !c->read_byte || !c->read_half || !c->write_half)return 0;
     target=rage_region_code(target);
+    free_run_tv.dispatch(c,target,free_run);
     if(free_run && rage_free_world_dispatch(c,target))return 1;
     switch(target){
+    case 0x3351c: // DrawTachometer: lighting follows physical tunnels only.
+        if(word(c,0x801e42e4)==12){
+            const uint32_t car=addr(0x8009e6d4);
+            c->gpr[6]=rage_track_in_tunnel(float(int32_t(c->read_word(car)))*4,
+                float(int32_t(c->read_word(car+0x60)))*4,float(int32_t(c->read_word(car+8)))*4)?2:0;
+            c->gpr[7]=0;
+        }
+        return 0;
+    case 0x46a2c: // Keep the top Rage Racer logo; omit the Time Attack banner.
+    case 0x16b7c: { // Pre-race course/timing text.
+        const uint32_t caller=c->gpr[31],begin=addr(0x8001c974);
+        if(!free_run || caller<begin || caller>=begin+992)return 0;
+        if(target==0x46a2c && caller==begin+0x80)return 0;
+        break;
+    }
     case 0x1b5dc:{
         const uint16_t buttons=c->read_half(addr(0x801e436e));
         const bool extra=word(c,0x8019cac0)!=0;
@@ -98,7 +125,7 @@ extern "C" int rage_free_run_dispatch(CPUState* c,uint32_t target){
             if(!extra && previous==1)previous=(previous-direction+5)%5;
             store(c,0x801e4184,previous);
         }else store(c,0x801e4184,original_selection(selection));
-        if(buttons&0x860){free_run=selection==3;multiplayer=selection==4;}
+        if(buttons&0x860){free_run=selection==3;multiplayer=selection==4;if(multiplayer){multiplayer_row=0;multiplayer_direction_held=false;rage_multiplayer_set_online(0);}}
         return 0;
     }
     case 0x1b2d4:draw_menu(c);break;
@@ -118,6 +145,7 @@ extern "C" int rage_free_run_dispatch(CPUState* c,uint32_t target){
             exit_vehicle_select=false;
             break;
         }
+        if(multiplayer)return 0; // Keep the stock Time Attack course-menu design.
         // Course assets and the saved course are ready. Enter the stock
         // vehicle-screen initializer before any course-selection frame draws.
         store(c,0x8019c9f8,3);
@@ -129,12 +157,27 @@ extern "C" int rage_free_run_dispatch(CPUState* c,uint32_t target){
         store(c,0x8009b358,250000);store(c,0x8009b35c,0);
         store(c,0x8009b30c,1); // Shared menu chrome and button hints open with the vehicle screen.
         return 0;
+    case 0x53730:
     case 0x5568c:
         if(multiplayer){
-            rage_multiplayer_draw(c);
             const uint16_t buttons=c->read_half(addr(0x801e436e));
-            if(buttons&0x90){exit_vehicle_select=true;store(c,0x8019c9f8,1);break;}
-            // Placeholder buttons may highlight, but never start a race,
+            if(rage_split_active()){
+                rage_split_update(c);rage_multiplayer_draw(c);
+                c->write_half(addr(0x801e436e),0);c->write_half(addr(0x801e436a),0);return 0;
+            }
+            const bool ready=word(c,target==0x53730?0x8009b338:0x8009b308)==0;
+            if(ready){
+                if(buttons&0x1000)multiplayer_row=(multiplayer_row+2)%3;
+                if(buttons&0x4000)multiplayer_row=(multiplayer_row+1)%3;
+                const bool direction=((buttons|c->read_half(addr(0x801e436a)))&0xa000)!=0;
+                if(direction && !multiplayer_direction_held)rage_multiplayer_switch((buttons|c->read_half(addr(0x801e436a)))&0x8000?-1:1);
+                multiplayer_direction_held=direction;
+            }
+            if(ready && multiplayer_row==0 && (buttons&0x860) && !rage_multiplayer_online())rage_split_enter();
+            rage_multiplayer_draw(c);
+            if((buttons&0x90) || (ready && multiplayer_row==2 && (buttons&0x860))){exit_vehicle_select=true;store(c,0x8019c9f8,1);break;}
+            // Start and Options remain placeholders until their flows are implemented.
+            // Never start a solo race,
             // customise a car or browse/change the player's vehicle.
             c->write_half(addr(0x801e436e),buttons&uint16_t(~0xa860u));
             c->write_half(addr(0x801e436a),c->read_half(addr(0x801e436a))&uint16_t(~0xa000u));
@@ -142,10 +185,12 @@ extern "C" int rage_free_run_dispatch(CPUState* c,uint32_t target){
         }
         if(free_run && word(c,0x8009b308)==5)exit_vehicle_select=true;
         return 0;
+    case 0x5194c:
     case 0x5131c:
         if(!multiplayer)return 0;
         rage_multiplayer_draw(c);
         break;
+    case 0x5290c:
     case 0x551bc:
         if(!multiplayer)return 0;
         // Preserve the stock screen fade state while removing gear labels.
@@ -157,15 +202,30 @@ extern "C" int rage_free_run_dispatch(CPUState* c,uint32_t target){
         break;
     case 0x4fce8: // Grade, make and car name.
     case 0x496f0: // Performance graph.
-    case 0x4cf30: // Showroom light burst.
     case 0x4f3ec: // Number of cars.
     case 0x49418: // Previous/next car arrows.
     case 0x52158: // Engine specification.
         if(!multiplayer)return 0;
         break;
+    case 0x4cf30:
+        if(multiplayer && rage_split_active())break;
+        return 0;
+    case 0x489ac:
+        if(multiplayer && rage_split_active())break;
+        return 0;
     case 0x48078:{
         if(multiplayer && word(c,0x801e42e4)==8){
             const uint32_t shape=c->gpr[5];
+            if(ram(shape,8)){
+                if(!rage_split_active() && c->read_half(shape)==12 && c->read_half(shape+2)==84 && c->read_byte(shape+4)==48 && c->read_byte(shape+5)==0){
+                    rage_menu_art::scripted(c,rage_menu_art::Multiplayer);break;
+                }
+                const uint32_t motion=c->gpr[6];
+                const int y=ram(motion,8)?int16_t(c->read_half(motion+6)):0;
+                if(rage_split_active() && ((y<180 && c->read_half(shape)>60 && c->read_half(shape+2)<80) || (c->read_half(shape)<80 && c->read_half(shape+2)>80)))break;
+                if(c->read_half(shape+2)>32 || c->read_half(shape)>128)return 0;
+            }
+            if(rage_split_active())break;
             // Rounded row plates are part of the shared screen chrome.
             // Captions and the CAR/S heading are separate scripted sprites.
             if(ram(shape,8) && c->read_half(shape)>80 && c->read_half(shape+2)>=20)return 0;
@@ -176,6 +236,9 @@ extern "C" int rage_free_run_dispatch(CPUState* c,uint32_t target){
         if(!ram(shape,8))return 0;
         const uint16_t width=c->read_half(shape),height=c->read_half(shape+2);
         const uint8_t u=c->read_byte(shape+4),v=c->read_byte(shape+5);
+        if(height==24 && width==54 && u==50 && v==96){
+            rage_menu_art::scripted(c,rage_menu_art::StartFreeRun,true);break;
+        }
         if(height==24 && width==36 && u==204 && v==0){
             // Reuse the original "exit" sprite, with the stock button's
             // position, colour, animation and selection highlight.
@@ -191,7 +254,11 @@ extern "C" int rage_free_run_dispatch(CPUState* c,uint32_t target){
         return 0;
     }
     case 0x363d4:
-        if(free_run){store(c,0x8009af9c,15000);store(c,0x801e8a8c,0);}
+        if(free_run){
+            // Keep the original two-part crossfade; shorten only the hidden
+            // ROUND artwork tail once the race renderer has been initialized.
+            if(word(c,0x801e42e4)==12 && word(c,0x801e40b8)<61 && word(c,0x801e42e0)>48)store(c,0x801e42e0,48);
+            store(c,0x8009af9c,15000);store(c,0x801e8a8c,0);}
         return 0;
     case 0x3591c:
         if(!free_run)return 0;
@@ -208,7 +275,6 @@ extern "C" int rage_free_run_dispatch(CPUState* c,uint32_t target){
         }
         c->gpr[2]=0;
         break;
-    case 0x1c974: // Actual pre-race ROUND screen (logo, course and best times).
     case 0x21d68: // Record-entry header.
     case 0x22068: // Pre-race best-time panel.
     case 0x333dc: // Either direction is valid in the open Free run network.

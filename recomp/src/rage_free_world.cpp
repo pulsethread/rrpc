@@ -18,6 +18,10 @@ struct Road {
 };
 std::array<Road,4> roads;
 unsigned current=0;
+struct CrestData {uint32_t origin=0;int32_t progress[2][8]{},motion[2][8]{};bool valid=false;};
+std::array<CrestData,4> crests;
+struct CrestHistory {unsigned route=4;uint32_t tick=~0u,progress=0;};
+CrestHistory crest_history;
 bool ready=false,installed=false;
 uint32_t original_points=0,original_count=0,original_arcs=0,original_length=0;
 uint64_t switches=0;
@@ -74,6 +78,37 @@ bool junction_footprint(CPUState* c,uint32_t car,double x,double y,double z,unsi
     }
     return crosses;
 }
+// Ignore only individual hull corners supported by another road surface.
+// Uncovered corners continue to establish the normal exterior wall limits.
+bool junction_corner_limits(CPUState* c,uint32_t car,double x,double y,double z,unsigned selected,unsigned index,int& right,int& left,uint16_t* contacts=nullptr){
+ const double angle=(c->read_word(car+0x24)&4095)*6.283185307179586/4096.,cs=std::cos(angle),sn=std::sin(angle);
+ const auto centre=contact(roads[selected],index,x,z);const uint32_t hull=rage_region_address(0x8007dab0);
+ bool opens=false,allCovered=true;unsigned retained=0;right=-32768;left=32767;
+ uint16_t rightContact=0,leftContact=0;
+ for(unsigned k=0;k<4;++k){const double hx=int16_t(c->read_half(hull+4*k))*4.,hz=int16_t(c->read_half(hull+4*k+2))*4.;
+  const double px=x+cs*hx+sn*hz,pz=z-sn*hx+cs*hz;const auto chosen=contact(roads[selected],index,px,pz);
+  bool covered=false;
+  for(const auto& road:roads){for(unsigned j=0;j<road.count;++j){const auto h=contact(road,j,px,pz);
+   if(h.end_distance<=2 && h.clearance>=-1 && std::abs(h.height-y)<=64){covered=true;break;}
+  }if(covered)break;}
+  allCovered&=covered;
+  if(covered && chosen.clearance<0){opens=true;continue;}
+  const double reach=chosen.lateral-centre.lateral;
+  if(int(std::ceil(reach))>right){right=int(std::ceil(reach));rightContact=uint16_t(k+1);}
+  if(int(std::floor(reach))<left){left=int(std::floor(reach));leftContact=uint16_t(k+1);}++retained;
+ }
+ if(!opens && !allCovered)return false;
+ if(allCovered || !retained){
+  // Every corner has physical pavement support. Disable only this call's
+  // single-ring edge clamp, whose fixed-point arc frame can disagree with
+  // the supported footprint. An uncovered corner restores normal contact
+  // on the next call; height, banking and surface response still run.
+  right=-32768;left=32767;
+  rightContact=leftContact=0;
+ }
+ if(contacts){contacts[0]=rightContact;contacts[1]=leftContact;}
+ right=std::clamp(right,-32768,32767);left=std::clamp(left,-32768,32767);return true;
+}
 bool publish(CPUState* c){
     if(installed)return true;
     original_points=read(c,0x8009e688);original_count=read(c,0x8009e6a8);
@@ -101,7 +136,7 @@ void select(CPUState* c,unsigned r){
 }
 
 void rage_free_world_routes(const RageFreeRoutes& blobs,const std::array<std::array<float,3>,4>& shifts){
-    ready=false;installed=false;switches=0;
+    ready=false;installed=false;switches=0;crests={};crest_history={};
     for(unsigned r=0;r<4;++r){
         auto& road=roads[r];road.bytes=blobs[r];road.prefix.clear();road.length=0;
         if(road.bytes.size()<28)return;
@@ -119,6 +154,13 @@ void rage_free_world_routes(const RageFreeRoutes& blobs,const std::array<std::ar
     ready=true;current=0;
 }
 int rage_free_world_ready(){return ready;}
+bool rage_free_world_road_contains(double x,double y,double z,double margin){
+ if(!ready)return false;
+ for(const auto& road:roads)for(unsigned i=0;i<road.count;++i){const auto h=contact(road,i,x/4,z/4);
+  if(h.end_distance<=.5 && h.clearance>=margin/4 && std::abs(h.height-y/4)<=32)return true;
+ }
+ return false;
+}
 unsigned rage_free_world_current_route(){return current;}
 uint64_t rage_free_world_switches(){return switches;}
 void rage_free_world_reset(){ready=false;installed=false;}
@@ -132,12 +174,38 @@ void rage_free_world_minimap(){
 
 int rage_free_world_dispatch(CPUState* c,uint32_t target){
     const bool collision=target==0x31298;
-    if(target!=0x2c168 && !collision)return 0;
+    const bool crest=target==0x39184;
+    if(target!=0x2c168 && !collision && !crest)return 0;
     if(!ready || !rage_free_run_active() || read(c,0x801e42e4)!=12)return 0;
     const uint32_t car=c->gpr[4],physical=car&0x1fffffffu;
     if(physical<0x10000 || physical>0x200000-0x19c || !publish(c))return 0;
     const bool player=physical==(rage_region_address(0x8009e6d4)&0x1fffffffu);
     if(!player)return 0;
+    if(crest){
+        // Use this road's own authored event coordinates, not the starting
+        // circuit's rescaled lap progress. Route switches/teleports cannot hop.
+        const auto& road=roads[current];const auto& data=crests[current];
+        const double x=int32_t(c->read_word(car)),z=int32_t(c->read_word(car+8));
+        const unsigned i=c->read_word(car+0x30)%road.count;const auto h=contact(road,i,x,z);
+        const uint32_t local=uint32_t(road.prefix[i]+std::clamp(h.along,0.,double(road_point(road,i).length)))%road.length;
+        const uint32_t progress=(data.origin+road.length-local)%road.length,tick=read(c,0x8009e690);
+        int32_t trigger=0;
+        if(data.valid && crest_history.route==current && tick!=crest_history.tick && tick-crest_history.tick<=4 && int32_t(c->read_word(car+0xa4))>=800){
+            int delta=int(progress)-int(crest_history.progress);
+            if(delta>int(road.length/2))delta-=road.length;
+            if(delta<-int(road.length/2))delta+=road.length;
+            if(std::abs(delta)<4096 && delta){const int row=delta<0;
+                for(unsigned e=0;e<8 && data.motion[row][e]!=-1;++e){
+                    const unsigned event=uint32_t(data.progress[row][e])%road.length;
+                    const unsigned crossed=delta>0?(event+road.length-crest_history.progress)%road.length:
+                        (crest_history.progress+road.length-event)%road.length;
+                    if(crossed>0 && crossed<=unsigned(std::abs(delta))){trigger=data.motion[row][e];break;}
+                }
+            }
+        }
+        crest_history={current,tick,progress};
+        c->gpr[2]=uint32_t(trigger);c->pc=c->gpr[31];return 1;
+    }
     const double x=int32_t(c->read_word(car)),z=int32_t(c->read_word(car+8));
     // The primary height word is reused as contact-work scratch. The rendered
     // height remains stable throughout physics and preserves bridge separation.
@@ -157,18 +225,13 @@ int rage_free_world_dispatch(CPUState* c,uint32_t target){
     if(collision){
         c->gpr[5]=hit.index;
         const uint32_t limits=c->gpr[6],lp=limits&0x1fffffffu;
-        const auto h=contact(road,hit.index,x,z);
-        if(lp>=0x10000 && lp<=0x200000-8 && h.clearance>=0 && h.clearance<128 && junction_footprint(c,car,x,y,z,current)){
+        int rightInset,leftInset;uint16_t contacts[2];
+        if(lp>=0x10000 && lp<=0x200000-8 && junction_corner_limits(c,car,x,y,z,current,hit.index,rightInset,leftInset,contacts)){
             if(!junction_limits)junction_limits=psx_mod_memory_alloc(8,4);
             if(junction_limits){
-                const auto a=road_point(road,hit.index),b=road_point(road,hit.index+1);
-                const double t=std::clamp(h.along/std::max(1u,a.length),0.,1.);
-                const double left=a.left*(1-t)+b.left*t,right=a.right*(1-t)+b.right*t;
-                const int leftInset=int16_t(c->read_half(limits+2)),rightInset=int16_t(c->read_half(limits));
-                c->write_half(junction_limits,uint16_t(std::min(rightInset,int(std::floor(right-h.lateral-2)))));
-                c->write_half(junction_limits+2,uint16_t(std::max(leftInset,int(std::ceil(-left-h.lateral+2)))));
-                c->write_word(junction_limits+4,c->read_word(limits+4));
-                c->gpr[6]=junction_limits;
+                c->write_half(junction_limits,uint16_t(rightInset));
+                c->write_half(junction_limits+2,uint16_t(leftInset));
+                c->write_half(junction_limits+4,contacts[0]);c->write_half(junction_limits+6,contacts[1]);c->gpr[6]=junction_limits;
             }
         }
         // Let the original contact routine compute height, banking, surface
@@ -183,9 +246,26 @@ bool rage_free_world_hide_later(CPUState* cpu){
     const uint32_t car=rage_region_address(0x8009e6d4);
     auto lower=[](unsigned r,unsigned i){const auto& b=rage_free_tunnel_bands[r];return b[3]>b[0] && (i<=b[1] || i>=b[2]);};
     if(current<3)return lower(current,cpu->read_word(car+0x30)%roads[current].count);
-    // The oval shares part of the lower road but has no upper section to hide.
     const double x=int32_t(cpu->read_word(car)),z=int32_t(cpu->read_word(car+8)),y=int32_t(cpu->read_word(car+0x60));
     for(unsigned r=0;r<3;++r){const auto h=closest(x,y,z,false,r);const auto c=contact(roads[r],h.index,x,z);
         if(c.clearance>=0 && std::abs(c.height-y)<128 && lower(r,h.index))return true;}
     return false;
+}
+
+bool rage_free_world_tunnel_routes_open(CPUState* cpu){
+    if(!ready || !rage_free_run_active() || !cpu || current>=3 || !roads[current].count)return false;
+    const unsigned index=cpu->read_word(rage_region_address(0x8009e6d4)+0x30)%roads[current].count;
+    return rage_free_world_tunnel_window(index,rage_free_tunnel_bands[current]);
+}
+
+void rage_free_world_crest_data(const RageFreeRoutes& events){
+    crests={};crest_history={};
+    for(unsigned r=0;r<4;++r){const auto& bytes=events[r];const auto& road=roads[r];
+        if(bytes.size()<132 || !road.count)continue;
+        auto& out=crests[r];const unsigned start=word(bytes,0)%road.count;
+        out.origin=(road.prefix[start]+uint32_t(road_point(road,start).length))%road.length;
+        for(unsigned row=0;row<2;++row)for(unsigned i=0;i<8;++i){const size_t p=4+row*64+i*8;
+            out.progress[row][i]=int32_t(word(bytes,p));out.motion[row][i]=int32_t(word(bytes,p+4));}
+        out.valid=true;
+    }
 }

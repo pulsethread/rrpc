@@ -3,6 +3,7 @@
 #endif
 #include "rage_music.h"
 #include "rage_music_selector.h"
+#include "rage_free_run.h"
 #include "song_catalog.h"
 #include "rage_region.h"
 #include "cpu_state.h"
@@ -21,9 +22,12 @@ std::vector<RageSong> songs;
 unsigned selected=0;bool in_round=false;
 uint64_t title_started=0;
 RageMusicConfirmation confirmation;
+bool confirmation_chime=false,chime_pending=false;
+uint64_t confirmation_chime_started=0;
 uint32_t address(uint32_t p);
 bool accelerator_down(CPUState* cpu){
     const uint32_t pad=address(0x801e436e)-6;
+    if(cpu->read_half(pad+2)&0x800)return true; // Start confirms on every pad type.
     const bool negcon=(cpu->read_half(pad)>>8)==0x23;
     if(negcon){
         const unsigned mapping=cpu->read_half(address(0x8019cb08));
@@ -81,9 +85,16 @@ void text_argument(CPUState* cpu,const std::string& text){
 }
 extern "C" void rage_music_dispatch(CPUState* cpu,uint32_t raw_target){
     const uint32_t target=raw_target<0x80000000u?raw_target:rage_region_code(raw_target);
-    if(target!=0x1cfb4 && target!=0x1cd54 && target!=0x16754 && target!=round_return && target!=draw_return)return;
+    if(target!=0x5d6ec && target!=0x1cfb4 && target!=0x1cd54 && target!=0x16754 && target!=round_return && target!=draw_return)return;
     if(!PSX_EXECUTION_ENHANCED || !cpu || !cpu->read_word || !cpu->write_word || !cpu->read_half || !cpu->write_half || !cpu->write_byte)return;
     const uint32_t sp=cpu->gpr[29],entry=address(0x80000000u|target);
+    if(target==0x5d6ec){
+        if(in_round && chime_pending && rage_region_code(cpu->gpr[31])==0x1d03c && cpu->gpr[4]==0x19){
+            // Reuse the stock ROUND sound call and audio bank; no extra guest
+            // call or asynchronous register/stack mutation is needed.
+            cpu->gpr[4]=2;confirmation_chime_started=GetTickCount64();confirmation_chime=true;chime_pending=false;
+        }return;
+    }
     if(draw_return && target==draw_return && sp==draw_sp){
         cpu->write_word(address(0x801e42cc),saved_selection);draw_return=0;
     }
@@ -95,7 +106,7 @@ extern "C" void rage_music_dispatch(CPUState* cpu,uint32_t raw_target){
     write_word=cpu->write_word;
     if(target==0x1cfb4 && cpu->read_word(address(0x801e42e4))==10 && psx_game_text_native_ok_full(entry)){
         rage_music_dispatch_pending=1;
-        if(!in_round){if(songs.empty())selected=cpu->read_word(address(0x801e42cc));load_songs();in_round=true;clear_custom();title_started=GetTickCount64();confirmation={};}
+        if(!in_round){if(songs.empty())selected=cpu->read_word(address(0x801e42cc));load_songs();in_round=true;clear_custom();title_started=GetTickCount64();confirmation={};confirmation_chime=false;chime_pending=false;}
         saved_buttons=cpu->read_half(address(0x801e436e));
         const unsigned previous_selection=selected;
         if(!confirmation.confirmed){
@@ -107,8 +118,8 @@ extern "C" void rage_music_dispatch(CPUState* cpu,uint32_t raw_target){
         const uint32_t timer=cpu->read_word(address(0x801e40b8));
         // UpdateRoundScreen increments this timer before its original 121-frame
         // transition. Loading and fading continue normally while we wait.
-        if(!confirmed && timer>119)cpu->write_word(address(0x801e40b8),119);
-        else if(confirmed && timer<120)cpu->write_word(address(0x801e40b8),120);
+        chime_pending=confirmed && !confirmation_chime && timer>=15;
+        cpu->write_word(address(0x801e40b8),rage_music_round_timer(timer,confirmed,confirmation_chime));
         cpu->write_half(address(0x801e436e),saved_buttons&~0xa000);
         // Keep original shuffle/count/save storage within its original bounds.
         const uint32_t base=selected<songs.size() && songs[selected].file.empty() && songs[selected].cd_track>=3 && songs[selected].cd_track<=11?uint32_t(songs[selected].cd_track-2):0;
@@ -146,4 +157,9 @@ extern "C" int rage_music_custom_read(uint32_t sector,uint8_t* bytes){
     std::memset(bytes,0,2352);
     if(mp3dec_ex_read(&custom->decoder,reinterpret_cast<mp3d_sample_t*>(bytes),want)!=want)return 0;
     custom->next=sample+want;++custom_reads;return 1;
+}
+
+extern "C" int rage_music_fast_load_requested(){
+    return rage_free_run_active() && confirmation.confirmed && confirmation_chime &&
+        GetTickCount64()-confirmation_chime_started>=120;
 }

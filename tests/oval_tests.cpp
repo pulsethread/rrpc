@@ -3,6 +3,8 @@
 #include "../recomp/src/rage_oval.cpp"
 #include <iostream>
 void rage_free_world_routes(const RageFreeRoutes&,const std::array<std::array<float,3>,4>&){}
+bool rage_free_world_road_contains(double,double,double,double){return false;}
+void rage_free_world_reset(){}
 #define require(x) do{if(!(x))throw std::runtime_error(#x);}while(0)
 int main(int argc,char** argv){try{
  // A foreign fence across the lane is omitted; an overhead bridge and
@@ -66,3 +68,5 @@ int main(int argc,char** argv){try{
  }
  return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+
+void rage_free_world_crest_data(const RageFreeRoutes&){}
