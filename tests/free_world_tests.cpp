@@ -169,6 +169,22 @@ int main(int argc,char** argv){
     assert(!rage_free_world_batch_visible(0,2,false,false,nearLo,nearHi,exitCamera));
     assert(rage_free_world_batch_visible(0,2,true,true,upperLo,upperHi,exitCamera,true));
     assert(rage_free_world_batch_visible(2,1,true,true,upperLo,upperHi,exitCamera,true));
+    // Fixed, path-distance aprons survive every active route and travel direction.
+    assert(rage_free_world_portal_apron(1000,1000,10000));
+    assert(rage_free_world_portal_apron(1640,1000,10000));
+    assert(!rage_free_world_portal_apron(1641,1000,10000));
+    assert(rage_free_world_portal_apron(9360,1000,10000));
+    assert(!rage_free_world_portal_apron(9359,1000,10000));
+    assert(rage_free_world_portal_apron(1700,1000,10000,100));
+    assert(!rage_free_world_portal_apron(5000,1000,10000,100));
+    unsigned apronFaces=0,hiddenFaces=0;
+    for(const auto& f:world.faces){apronFaces+=f.free_run_portal!=0;hiddenFaces+=f.free_run_later && !f.free_run_portal;}
+    assert(apronFaces>0 && hiddenFaces>0);
+    std::cout<<"Persistent portal faces "<<apronFaces<<", filtered interior "<<hiddenFaces<<"\n";
+    for(unsigned r=0;r<3;++r)for(unsigned other=0;other<3;++other)if(r!=other){
+        assert(rage_free_world_batch_visible(r,1u<<other,true,true,upperLo,upperHi,exitCamera,false,true));
+        assert(!rage_free_world_batch_visible(r,1u<<other,false,false,upperLo,upperHi,exitCamera,false,false));
+    }
     for(unsigned r=0;r<3;++r){
         current=r;const auto& b=rage_free_tunnel_bands[r];
         std::cout<<"Route "<<r<<" tunnel visibility boundaries "<<b[0]<<","<<b[1]<<","<<b[2]<<","<<b[3]<<"\n";

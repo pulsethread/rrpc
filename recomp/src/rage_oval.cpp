@@ -273,7 +273,7 @@ bool rage_oval_extend(const RageTrackCourse& active,RageTrackCourse& drawing){
   for(const auto& t:corners)missing|=!exact.count(key(aligned[t[0]],aligned[t[1]],aligned[t[2]]));
   if(merging_world?free_world_omit(f,aligned,active.route):(missing && blocks_route(aligned,active.route))){++barriers;continue;}
   RageTrackSector sector{};sector.first=(uint32_t)drawing.faces.size();for(int j=0;j<3;++j){sector.lo[j]=1e30f;sector.hi[j]=-1e30f;}
-  for(const auto& t:corners){Polygon poly;Key original;for(int k=0;k<3;++k){Point p=point(oval,f.vertex[t[k]]);for(int j=0;j<3;++j)p[j]+=shift[j];original[k]=p;poly.push_back({p,double(f.uv[t[k]]&255),double((f.uv[t[k]]>>8)&255)});}auto canonical=key(original[0],original[1],original[2]);if(exact.count(canonical)){if(merging_world)for(unsigned owner:exactOwners[visibilityLayer][canonical])drawing.faces[owner].free_run_routes|=f.free_run_routes;++shared;continue;}Surface test;if(!surface(original,test))continue;
+  for(const auto& t:corners){Polygon poly;Key original;for(int k=0;k<3;++k){Point p=point(oval,f.vertex[t[k]]);for(int j=0;j<3;++j)p[j]+=shift[j];original[k]=p;poly.push_back({p,double(f.uv[t[k]]&255),double((f.uv[t[k]]>>8)&255)});}auto canonical=key(original[0],original[1],original[2]);if(exact.count(canonical)){if(merging_world)for(unsigned owner:exactOwners[visibilityLayer][canonical]){drawing.faces[owner].free_run_routes|=f.free_run_routes;drawing.faces[owner].free_run_portal|=f.free_run_portal;}++shared;continue;}Surface test;if(!surface(original,test))continue;
    std::vector<Polygon> pieces{poly};
    // Recheck each resulting piece: a large sloped face may only become
    // coplanar with a neighbouring receiver after an earlier clip.
@@ -290,7 +290,7 @@ bool rage_oval_extend(const RageTrackCourse& active,RageTrackCourse& drawing){
      bool disjoint=false;
      if(coplanar)for(int j=0;j<3;++j)if(j!=s.axis){double lo=piece[0].p[j],hi=lo,sl=s.p[0][j],sh=sl;for(const auto& v:piece){lo=std::min(lo,v.p[j]);hi=std::max(hi,v.p[j]);}for(int k=1;k<3;++k){sl=std::min(sl,s.p[k][j]);sh=std::max(sh,s.p[k][j]);}disjoint|=hi<=sl || sh<=lo;}
      if(!coplanar || disjoint){next.push_back(std::move(piece));continue;}
-     if(merging_world)drawing.faces[existingFaces[receiver]].free_run_routes|=f.free_run_routes;
+     if(merging_world){drawing.faces[existingFaces[receiver]].free_run_routes|=f.free_run_routes;drawing.faces[existingFaces[receiver]].free_run_portal|=f.free_run_portal;}
      auto result=subtract(piece,s);for(auto& r:result)next.push_back(std::move(r));
     }
     pieces=std::move(next);if(pieces.empty())break;
@@ -349,7 +349,7 @@ void assign_world_banks(RageTrackCourse& mesh,const Bytes& pack,unsigned source,
  const unsigned start=u32(pack,offsets[9])%count;const double origin=prefix[start+1],length=prefix.back();
  const int lo=int32_t(u32(pack,offsets[0])),hi=int32_t(u32(pack,offsets[0]+4));
  for(auto& f:mesh.faces){double x=0,y=0,z=0;for(auto v:f.vertex){x+=mesh.vertices[v][0]/16.;y+=mesh.vertices[v][1]/16.;z+=mesh.vertices[v][2]/16.;}
-  double best=1e30,progress=0;unsigned nearest=0;bool near_lower=false;
+  double best=1e30,progress=0,road_along=0;unsigned nearest=0;bool near_lower=false;
   for(unsigned i=0;i<count;++i){const auto& a=points[i];double cx=0,cz=0;
    if(a.arc&3){const int64_t p=path+4+24*count+12*int64_t(int16_t(a.arc)>>4);if(p>=0 && p+8<=int64_t(offsets[5])){cx=int32_t(u32(pack,size_t(p)));cz=int32_t(u32(pack,size_t(p)+4));}}
    const auto h=rage_road_contact(a,points[(i+1)%count],cx,cz,x,z);
@@ -358,10 +358,14 @@ void assign_world_banks(RageTrackCourse& mesh,const Bytes& pack,unsigned source,
    if(band && (i<=(*band)[1] || i>=(*band)[2]) && h.end_distance<128 &&
       h.distance<std::max(a.left,a.right)+128 && std::abs(h.height-y)<768)near_lower=true;
    const double score=h.distance+h.end_distance*8+std::abs(h.height-y)*.1;
-   if(score<best){best=score;nearest=i;progress=std::fmod(origin-prefix[i]-std::clamp(h.along,0.,double(a.length))+length,length);}
+   if(score<best){best=score;nearest=i;road_along=prefix[i]+std::clamp(h.along,0.,double(a.length));progress=std::fmod(origin-prefix[i]-std::clamp(h.along,0.,double(a.length))+length,length);}
   }
   const int section=int(progress)>>8;const unsigned bank=section>=lo && section<hi?1:0;
   f.page=uint16_t(f.page&0x1ff)|uint16_t((source+bank)<<9);
+  // Include complete faces touching the apron; never cut tunnel walls or
+  // road polygons at an arbitrary distance plane. Classification is baked once.
+  double radius=0;for(auto v:f.vertex)radius=std::max(radius,std::hypot(mesh.vertices[v][0]/4.-x,mesh.vertices[v][2]/4.-z));
+  f.free_run_portal=band && rage_free_world_portal_apron(road_along,prefix[(*band)[1]+1],prefix[(*band)[2]],radius);
   f.free_run_routes=1u<<(((source-2)/2)%4);
   f.free_run_later=band && nearest>(*band)[1] && nearest<(*band)[2] && !near_lower;
  }

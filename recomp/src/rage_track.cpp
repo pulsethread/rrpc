@@ -52,7 +52,7 @@ struct ProjectionCache {
 struct FadeView {std::vector<RageTrackFadeState> sectors;float seen=-1000;ProjectionCache current,previous;};
 std::unordered_map<uint32_t,FadeView> fade_views;
 
-struct PreparedBatch {std::vector<PSXTerrainTriangle> triangles;uint64_t identity=0;unsigned routes=0,layer=0;bool later=false;float lo[3]={1e30f,1e30f,1e30f},hi[3]={-1e30f,-1e30f,-1e30f};};
+struct PreparedBatch {std::vector<PSXTerrainTriangle> triangles;uint64_t identity=0;unsigned routes=0,layer=0;bool later=false,portal=false;float lo[3]={1e30f,1e30f,1e30f},hi[3]={-1e30f,-1e30f,-1e30f};};
 struct PreparedSector {std::vector<PreparedBatch> batches;};
 uint64_t next_prepared_identity=0;
 using PreparedCourse=std::vector<PreparedSector>;
@@ -68,8 +68,8 @@ std::shared_ptr<PreparedCourse> prepare_course(const RageTrackCourse& mesh){
         for(uint32_t q=sector.first;q<sector.first+sector.count;++q){
             const auto& face=mesh.faces[sector.draw_order.empty()?q:sector.draw_order[q-sector.first]];
             auto& batches=(*result)[s].batches;
-            if(batches.empty() || batches.back().routes!=face.free_run_routes || batches.back().later!=bool(face.free_run_later) || batches.back().layer!=face.decal || batches.back().triangles.size()>=128){
-                batches.emplace_back();auto& batch=batches.back();batch.identity=++next_prepared_identity;batch.routes=face.free_run_routes;batch.later=face.free_run_later!=0;batch.layer=face.decal;
+            if(batches.empty() || batches.back().routes!=face.free_run_routes || batches.back().later!=bool(face.free_run_later) || batches.back().portal!=bool(face.free_run_portal) || batches.back().layer!=face.decal || batches.back().triangles.size()>=128){
+                batches.emplace_back();auto& batch=batches.back();batch.identity=++next_prepared_identity;batch.routes=face.free_run_routes;batch.later=face.free_run_later!=0;batch.portal=face.free_run_portal!=0;batch.layer=face.decal;
             }
             auto& batch=batches.back();
             for(auto v:face.vertex)for(int k=0;k<3;++k){batch.lo[k]=std::min(batch.lo[k],mesh.vertices[v][k]);batch.hi[k]=std::max(batch.hi[k],mesh.vertices[v][k]);}
@@ -355,6 +355,8 @@ extern "C" void rage_track_dispatch(CPUState* cpu,uint32_t target) {
     pending.tick=new_tick;pending.key=pending.ret^(cpu->read_word(pending.ctx+0x68)?0x1000000u:0);
     rage_scene_lights_capture(cpu,new_tick);
     pending.unlit=cpu->read_word(pending.ctx+0x84)!=0;
+    // Visibility snapshots only: both course meshes and prepared batches remain
+    // owned for the entire race; selecting another route never rebuilds them.
     pending.hide_later=rage_free_world_hide_later(cpu);pending.route=rage_free_world_current_route();pending.tunnel_open=rage_free_world_tunnel_routes_open(cpu);
     // Capture exactly the stock renderer's visible sector identities. Native
     // interpolation reuses this selection rather than extending it off-camera.
@@ -505,7 +507,7 @@ extern "C" int rage_track_submit(uint32_t packet,int dx,int dy,uint32_t texture_
                 for(size_t i=0;i<view.mesh->sectors.size();++i){const auto& sector=view.mesh->sectors[i];
                     if(!rage_shadow_bounds_visible(lightRows,sector.lo,sector.hi,4096))continue;
                     const auto& data=(*view.prepared)[i];
-                    for(const auto& batch:data.batches)if(!batch.layer && rage_free_world_batch_visible(view.route,batch.routes,view.hide_later,batch.later,batch.lo,batch.hi,pose.drawing_camera,view.tunnel_open))
+                    for(const auto& batch:data.batches)if(!batch.layer && rage_free_world_batch_visible(view.route,batch.routes,view.hide_later,batch.later,batch.lo,batch.hi,pose.drawing_camera,view.tunnel_open,batch.portal))
                         gl_renderer_draw_retained_terrain(&shadow,batch.triangles.data(),(unsigned)batch.triangles.size(),view.texture_source,view.unlit,texture_window,batch.identity);
                 }
             }
@@ -522,7 +524,7 @@ extern "C" int rage_track_submit(uint32_t packet,int dx,int dy,uint32_t texture_
                 const size_t index=&sector-view.mesh->sectors.data();
                 auto camera=pose;camera.fade_start=rage_track_lod_fade()?fade.sectors[index].start:0;
                 for(const auto& batch:(*view.prepared)[index].batches){
-                    if(batch.layer!=unsigned(layer) || !rage_free_world_batch_visible(view.route,batch.routes,view.hide_later,batch.later,batch.lo,batch.hi,pose.drawing_camera,view.tunnel_open))continue;
+                    if(batch.layer!=unsigned(layer) || !rage_free_world_batch_visible(view.route,batch.routes,view.hide_later,batch.later,batch.lo,batch.hi,pose.drawing_camera,view.tunnel_open,batch.portal))continue;
                     gl_renderer_draw_retained_terrain(&camera,batch.triangles.data(),(unsigned)batch.triangles.size(),view.texture_source,view.unlit,texture_window,batch.identity);count+=batch.triangles.size();
                 }
                 continue;
@@ -532,7 +534,7 @@ extern "C" int rage_track_submit(uint32_t packet,int dx,int dy,uint32_t texture_
                 if(face.decal!=unsigned(layer))continue;
                 float lo[3]={1e30f,1e30f,1e30f},hi[3]={-1e30f,-1e30f,-1e30f};
                 for(auto v:face.vertex)for(int k=0;k<3;++k){lo[k]=std::min(lo[k],view.mesh->vertices[v][k]);hi[k]=std::max(hi[k],view.mesh->vertices[v][k]);}
-                if(!rage_free_world_batch_visible(view.route,face.free_run_routes,view.hide_later,face.free_run_later!=0,lo,hi,pose.drawing_camera,view.tunnel_open))continue;
+                if(!rage_free_world_batch_visible(view.route,face.free_run_routes,view.hide_later,face.free_run_later!=0,lo,hi,pose.drawing_camera,view.tunnel_open,face.free_run_portal!=0))continue;
                 // Unlit stream handlers select the adjacent authored palette.
                 // The stored CLUT is the lit variant, not always the final material.
                 const uint16_t clut=(uint16_t)(face.clut+

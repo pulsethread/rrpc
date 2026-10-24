@@ -40,6 +40,7 @@ struct RageTrackFace {
     uint32_t first_triangle=0,triangle_count=0;
     uint32_t decal=0; /* Geometrically contained, coplanar ground detail. */
     uint32_t free_run_routes=0; /* Zero: unrestricted; otherwise owning route bits. */
+    uint32_t free_run_portal=0; /* Persistent entrance/exit apron on hidden routes. */
     uint32_t free_run_later=0; /* Hidden behind the main tunnels from the lower stretch. */
     uint32_t coverage=0; /* Open boundary needs conservative subpixel coverage. */
 };

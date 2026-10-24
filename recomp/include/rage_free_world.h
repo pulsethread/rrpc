@@ -35,13 +35,20 @@ inline bool rage_free_world_later_visible(bool hide,const float lo[3],const floa
     return true;
 }
 
+// Distance is along the authored road, independent of travel direction. Road
+// points use 32 units/metre (rendering coordinates are four times larger).
+inline bool rage_free_world_portal_apron(double along,double first,double last,double radius=0){
+    constexpr double apron=20.0*32.0;
+    return first<=last && ((along+radius>=first && along-radius<=first+apron) ||
+                          (along+radius>=last-apron && along-radius<=last));
+}
 // Open all route geometry through either main tunnel. Outside the portals,
 // only the selected route and shared geometry remain; proximity cannot reveal
 // another route as the car approaches it. Extreme Oval stays exempt.
 inline bool rage_free_world_batch_visible(unsigned route,unsigned owners,bool hide,bool later,
-    const float lo[3],const float hi[3],const float camera[3],bool tunnel_open=false){
+    const float lo[3],const float hi[3],const float camera[3],bool tunnel_open=false,bool portal=false){
     // Extreme Oval (route 3), including shared faces, is always part of the world.
-    if(tunnel_open || (owners&(1u<<3)))return true;
+    if(portal || tunnel_open || (owners&(1u<<3)))return true;
     if(later && !rage_free_world_later_visible(hide,lo,hi,camera))return false;
     if(!owners || (owners&(1u<<route)))return true;
     return false;

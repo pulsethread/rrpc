@@ -1,3 +1,17 @@
+# Release 0.3.30
+
+Keeps Free Run tunnel entrances complete when alternative routes are hidden.
+
+- Keep the first and last approximately 20 metres of each alternative route visible, including whole intersecting road and scenery faces.
+- Apply the same visibility rule to normal, mirrored, fallback and shadow rendering. Distant inactive route geometry remains hidden; Extreme Oval stays visible.
+- Retain the combined track and prepared batches throughout the race. Route switches only select draw batches; they do not reload, rebuild or unload route geometry.
+
+Extract `RageRacer-PC-v0.3.30.zip` into your existing game folder, replacing supplied program files. Keep `data.dat`, saves, settings, music and mods. No original game data is included.
+
+Validation: 21 native tests passed, including entrance/exit distance boundaries, polygon overlap, all three route masks, both travel directions, and the existing road/crest tests. The live GPU probe passed all 168 checks.
+
+A controller-driven Free Run lap completed with one track load and zero track errors.
+
 # Release 0.3.29
 
 Improves Free Run road handling, menus and rendering stability, with multiplayer menu and controller setup foundations.

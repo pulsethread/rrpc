@@ -1567,3 +1567,11 @@ in Port/data/free-run-transition/quality-installation.json.
 ## 24 October: draw distance, route crests and race fade
 
 Normal terrain/environment depth is 106496 (original81920, previous131072); extended depth139264. Shadow extent shares the terrain limit. Route-local chunk9 crest events restore positive hops and negative crest holds in both directions without applying the starting route's events to another road. All28 actual-disc authored events pass. The original race draw and fullscreen fade run normally, with only hidden race artwork fade shortened. Confirmed Free Run loading temporarily uses bounded4x data-disc timing and restores the prior rate on gameplay entry; an instant-disc experiment was rejected and is absent. Recorded transition7.99s ->5.82s; required initialization remains.21/21 tests, full driving lap, positive rising jump, and168/0 GPU probe pass. Evidence:Port/data/distance-fade-jumps/bounded,drive,positive-close.json. Earlier final/ directory is a rejected experiment, not release validation.
+
+## 24 October: persistent Free Run portal aprons (v0.3.30)
+
+Route switching already selects draw batches without releasing drawing_course or drawing_prepared. Race initialization alone decodes/merges donors and prepares immutable batches. Keep that lifecycle; no route-triggered loading, eviction or rebuild is introduced. The renderer's ordinary bounded material/mesh caches remain in use.
+
+Bake free_run_portal metadata from path distance between the first tunnel's exit and last tunnel's entrance. Nominal 20m=640 authored road units; rendering uses four times the road scale. Include faces whose horizontal bounds overlap either distance interval, rather than physically slicing polygons. Preserve the flag through exact and coplanar donor merges. Separate prepared batches by portal flag and apply the shared predicate to scene, mirror, fallback and shadow-only draws. The middle of inactive branches still hides, and Extreme Oval remains exempt.
+
+Validation:21/21 native tests; actual-disc world contains persistent portal faces and filtered interior faces. Boundary and overlap tests plus all three route ownership masks pass. Live 168-sample GPU probe has zero failures. Diagnostics:Port/data/portal-aprons/.
